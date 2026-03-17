@@ -1,5 +1,6 @@
 package com.sinxn.teledrive.ui.screens.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
+import com.sinxn.teledrive.ui.screens.home.components.BreadcrumbsBar
 import com.sinxn.teledrive.ui.screens.home.components.FileListView
 import com.sinxn.teledrive.ui.screens.home.components.FileGridView
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,11 +38,23 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isGridView by viewModel.isGridView.collectAsState()
-    
+    val breadcrumbs by viewModel.breadcrumbs.collectAsState()
+
+    // Intercept physical/gesture back button if we are inside a folder
+    BackHandler(enabled = breadcrumbs.isNotEmpty()) {
+        viewModel.navigateUp()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("TeleDrive") },
+                title = { 
+                    BreadcrumbsBar(
+                        breadcrumbs = breadcrumbs,
+                        onRootClick = { viewModel.navigateToRoot() },
+                        onBreadcrumbClick = { index -> viewModel.navigateToBreadcrumb(index) }
+                    )
+                },
                 actions = {
                     IconButton(onClick = { viewModel.toggleViewMode() }) {
                         Icon(
@@ -83,14 +97,22 @@ fun HomeScreen(
                                 FileGridView(
                                     files = state.files,
                                     onFileClick = { file ->
-                                        if (file.type == "folder") onNavigateToFolder(file.id)
+                                        if (file.type == "folder") {
+                                            viewModel.navigateToFolder(file)
+                                        } else {
+                                            // TODO: Open file viewer
+                                        }
                                     }
                                 )
                             } else {
                                 FileListView(
                                     files = state.files,
                                     onFileClick = { file ->
-                                        if (file.type == "folder") onNavigateToFolder(file.id)
+                                        if (file.type == "folder") {
+                                            viewModel.navigateToFolder(file)
+                                        } else {
+                                            // TODO: Open file viewer
+                                        }
                                     }
                                 )
                             }
