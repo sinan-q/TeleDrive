@@ -16,6 +16,7 @@ kotlinxSerializationJson = "1.7.3"
 tdlib = "1.8.56"
 room = "2.8.4"
 composeQrCode = "1.0.1"
+securityCrypto = "1.1.0-alpha06"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -54,6 +55,9 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 
 # QR Code Generator for Compose
 compose-qr-code = { group = "com.lightspark", name = "compose-qr-code", version.ref = "composeQrCode" }
+
+# EncryptedSharedPreferences
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto-ktx", version.ref = "securityCrypto" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

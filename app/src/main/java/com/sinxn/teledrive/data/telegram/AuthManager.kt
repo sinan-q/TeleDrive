@@ -3,6 +3,7 @@ package com.sinxn.teledrive.data.telegram
 import android.content.Context
 import android.util.Log
 import com.sinxn.teledrive.BuildConfig
+import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +24,8 @@ import javax.inject.Singleton
 @Singleton
 class AuthManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val telegramClient: TelegramClient
+    private val telegramClient: TelegramClient,
+    private val securePrefs: SecurePrefs
 ) {
     companion object {
         private const val TAG = "AuthManager"
@@ -73,12 +75,15 @@ class AuthManager @Inject constructor(
                 _authState.value = AuthState.WaitQrCodeConfirmation(state.link)
             }
             is TdApi.AuthorizationStateReady -> {
+                securePrefs.setHasSession(true)
                 _authState.value = AuthState.Ready
             }
             is TdApi.AuthorizationStateLoggingOut -> {
+                securePrefs.setHasSession(false)
                 _authState.value = AuthState.LoggingOut
             }
             is TdApi.AuthorizationStateClosed -> {
+                securePrefs.setHasSession(false)
                 _authState.value = AuthState.Closed
             }
             is TdApi.AuthorizationStateClosing -> {

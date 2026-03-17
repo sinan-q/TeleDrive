@@ -89,6 +89,9 @@ dependencies {
     // QR Code Generator
     implementation(libs.compose.qr.code)
 
+    // Security (EncryptedSharedPreferences)
+    implementation(libs.androidx.security.crypto)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
