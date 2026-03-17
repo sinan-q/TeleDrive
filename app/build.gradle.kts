@@ -63,6 +63,9 @@ dependencies {
     // Serialization (for type-safe nav routes)
     implementation(libs.kotlinx.serialization.json)
 
+    // TDLib (Telegram Database Library)
+    implementation(libs.tdlib)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -13,6 +13,7 @@ hilt = "2.56.1"
 hiltNavigationCompose = "1.2.0"
 navigationCompose = "2.8.9"
 kotlinxSerializationJson = "1.7.3"
+tdlib = "1.8.56"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -40,6 +41,9 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 
 # Serialization (for type-safe navigation routes)
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+
+# TDLib (Telegram Database Library)
+tdlib = { group = "com.github.tdlibx", name = "td", version.ref = "tdlib" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
