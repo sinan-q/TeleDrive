@@ -3,6 +3,7 @@ package com.sinxn.teledrive.data.repository
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.telegram.TelegramClient
+import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import kotlinx.coroutines.flow.Flow
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
@@ -37,6 +38,12 @@ class FileRepositoryImpl @Inject constructor(
         val messagesResult = telegramClient.send(historyParams) as TdApi.Messages
 
         return messagesResult.messages.toList()
+    }
+
+    override suspend fun syncSavedMessages(userId: String) {
+        val messages = getSavedMessagesHistory()
+        val fileEntities = messages.mapNotNull { it.toFileEntity(userId) }
+        fileDao.insertFiles(fileEntities)
     }
 
     override suspend fun getFileById(id: String): FileEntity? =

@@ -3,41 +3,66 @@ package com.sinxn.teledrive.ui.screens.home
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.repository.FileRepository
+import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 
 sealed class HomeUiState {
     data object Loading : HomeUiState()
-    data class Success(val messages: List<TdApi.Message>) : HomeUiState()
+    data class Success(val files: List<FileEntity>) : HomeUiState()
     data class Error(val message: String) : HomeUiState()
 }
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val fileRepository: FileRepository
+    private val fileRepository: FileRepository,
+    private val telegramClient: TelegramClient
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
-        fetchSavedMessages()
+        loadFiles()
     }
 
-    fun fetchSavedMessages() {
+    private fun loadFiles() {
         viewModelScope.launch {
             _uiState.value = HomeUiState.Loading
             try {
-                val messages = fileRepository.getSavedMessagesHistory()
-                _uiState.value = HomeUiState.Success(messages)
+                // 1. Get the current user ID to scope our queries
+                val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
+                val userId = me.id.toString()
+
+                // 2. Trigger a background sync of remote data -> Room DB
+                launch {
+                    try {
+                        fileRepository.syncSavedMessages(userId)
+                    } catch (e: Exception) {
+                        Log.e("HomeViewModel", "Background sync failed", e)
+                    }
+                }
+
+                // 3. Observe the local database for instant, reactive UI updates
+                fileRepository.getFilesByParent(null, userId)
+                    .catch { e ->
+                        Log.e("HomeViewModel", "Failed to read database flow", e)
+                        _uiState.value = HomeUiState.Error(e.message ?: "Database error")
+                    }
+                    .collect { files ->
+                        _uiState.value = HomeUiState.Success(files)
+                    }
+
             } catch (e: Exception) {
-                Log.e("HomeViewModel", "Failed to fetch saved messages", e)
+                Log.e("HomeViewModel", "Failed to initialize Home screen", e)
                 _uiState.value = HomeUiState.Error(e.message ?: "Unknown error occurred")
             }
         }

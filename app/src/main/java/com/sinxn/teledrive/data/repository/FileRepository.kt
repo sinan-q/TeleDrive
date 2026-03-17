@@ -17,6 +17,11 @@ interface FileRepository {
      */
     suspend fun getSavedMessagesHistory(): List<org.drinkless.tdlib.TdApi.Message>
 
+    /**
+     * Fetches Saved Messages from TDLib, parses them, and saves them to the Room database.
+     */
+    suspend fun syncSavedMessages(userId: String)
+
     /** Get a single file by its ID. */
     suspend fun getFileById(id: String): FileEntity?
 

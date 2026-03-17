@@ -66,32 +66,40 @@ fun HomeScreen(
                     )
                 }
                 is HomeUiState.Success -> {
-                    if (state.messages.isEmpty()) {
+                    if (state.files.isEmpty()) {
                         Text(
-                            text = "No saved messages found.",
+                            text = "No saved files found.",
                             modifier = Modifier.align(Alignment.Center)
                         )
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            items(state.messages) { message ->
+                            items(state.files) { file ->
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(16.dp)
                                 ) {
                                     Text(
-                                        text = "Message ID: ${message.id}",
+                                        text = file.name,
                                         style = MaterialTheme.typography.titleMedium
                                     )
+                                    val sizeStr = file.size?.let { s -> 
+                                        if(s < 1024) "$s B" else {
+                                            val z = (63 - java.lang.Long.numberOfLeadingZeros(s)) / 10
+                                            String.format("%.1f %sB", s.toDouble() / (1L shl (z * 10)), " KMGTPE"[z])
+                                        }
+                                    } ?: "Unknown size"
+                                    
                                     Text(
-                                        text = "Date: ${message.date}",
+                                        text = "Size: $sizeStr",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                     Text(
-                                        text = "Content Type: ${message.content.javaClass.simpleName}",
-                                        style = MaterialTheme.typography.bodyMedium
+                                        text = "Type: ${file.mimeType ?: "Unknown"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
