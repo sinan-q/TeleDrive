@@ -66,6 +66,11 @@ dependencies {
     // TDLib (Telegram Database Library)
     implementation(libs.tdlib)
 
+    // Room (Local Database)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

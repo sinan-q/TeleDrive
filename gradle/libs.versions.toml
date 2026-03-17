@@ -14,6 +14,7 @@ hiltNavigationCompose = "1.2.0"
 navigationCompose = "2.8.9"
 kotlinxSerializationJson = "1.7.3"
 tdlib = "1.8.56"
+room = "2.8.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -44,6 +45,11 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # TDLib (Telegram Database Library)
 tdlib = { group = "com.github.tdlibx", name = "td", version.ref = "tdlib" }
+
+# Room (Local Database)
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
