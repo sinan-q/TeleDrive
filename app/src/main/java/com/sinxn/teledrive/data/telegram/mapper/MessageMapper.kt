@@ -12,13 +12,37 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
     val entityId = "msg_${this.id}"
     val createdAtMs = this.date * 1000L
 
+    // Part aggregation logic
+    val partRegex = Regex("""^(.*)\.part(\d+)$""", RegexOption.IGNORE_CASE)
+    var isMultipart = false
+    var partIndex: Int? = null
+    var originalFileName: String? = null
+
+    // Helper to evaluate parts
+    fun parseMultipart(fileName: String) {
+        val matchResult = partRegex.find(fileName)
+        if (matchResult != null) {
+            isMultipart = true
+            originalFileName = matchResult.groupValues[1]
+            partIndex = matchResult.groupValues[2].toIntOrNull()
+        } else {
+            originalFileName = fileName
+        }
+    }
+
     return when (val content = this.content) {
         is TdApi.MessageDocument -> {
+            val fileName = content.document.fileName.takeIf { it.isNotBlank() } ?: "Unknown Document"
+            parseMultipart(fileName)
+            
             FileEntity(
                 id = entityId,
-                name = content.document.fileName.takeIf { it.isNotBlank() } ?: "Unknown Document",
+                name = fileName,
                 type = "file",
                 mimeType = content.document.mimeType,
+                isMultipart = isMultipart,
+                partIndex = partIndex,
+                originalFileName = originalFileName,
                 size = content.document.document.expectedSize.toLong(),
                 messageId = this.id.toString(),
                 fileId = content.document.document.id.toString(),
@@ -48,11 +72,17 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
             )
         }
         is TdApi.MessageVideo -> {
+            val fileName = content.video.fileName.takeIf { it.isNotBlank() } ?: "Video_${this.date}.mp4"
+            parseMultipart(fileName)
+            
             FileEntity(
                 id = entityId,
-                name = content.video.fileName.takeIf { it.isNotBlank() } ?: "Video_${this.date}.mp4",
+                name = fileName,
                 type = "file",
                 mimeType = content.video.mimeType,
+                isMultipart = isMultipart,
+                partIndex = partIndex,
+                originalFileName = originalFileName,
                 size = content.video.video.expectedSize.toLong(),
                 messageId = this.id.toString(),
                 fileId = content.video.video.id.toString(),
@@ -66,14 +96,19 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
         is TdApi.MessageAudio -> {
             val title = content.audio.title.takeIf { it.isNotBlank() }
             val performer = content.audio.performer.takeIf { it.isNotBlank() }
-            val name = if (title != null && performer != null) "$performer - $title"
+            val fileName = if (title != null && performer != null) "$performer - $title"
             else title ?: content.audio.fileName.takeIf { it.isNotBlank() } ?: "Audio_${this.date}.mp3"
+
+            parseMultipart(fileName)
 
             FileEntity(
                 id = entityId,
-                name = name,
+                name = fileName,
                 type = "file",
                 mimeType = content.audio.mimeType,
+                isMultipart = isMultipart,
+                partIndex = partIndex,
+                originalFileName = originalFileName,
                 size = content.audio.audio.expectedSize.toLong(),
                 messageId = this.id.toString(),
                 fileId = content.audio.audio.id.toString(),

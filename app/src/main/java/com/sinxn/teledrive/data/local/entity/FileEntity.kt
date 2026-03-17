@@ -43,6 +43,22 @@ data class FileEntity(
     @ColumnInfo(name = "mime_type")
     val mimeType: String? = null,
 
+    /** Identifies if this file is a chunk of a larger file (e.g. video.mp4.part1) */
+    @ColumnInfo(name = "is_multipart")
+    val isMultipart: Boolean = false,
+
+    /** The chunk index (e.g. 1 for part1) */
+    @ColumnInfo(name = "part_index")
+    val partIndex: Int? = null,
+
+    /** Total number of parts (if known) */
+    @ColumnInfo(name = "total_parts")
+    val totalParts: Int? = null,
+
+    /** The root filename without the .partX extension (e.g. video.mp4) */
+    @ColumnInfo(name = "original_file_name")
+    val originalFileName: String? = null,
+
     /** File size in bytes */
     val size: Long? = null,
 

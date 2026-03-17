@@ -6,6 +6,7 @@ import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,7 +23,29 @@ class FileRepositoryImpl @Inject constructor(
 ) : FileRepository {
 
     override fun getFilesByParent(parentId: String?, userId: String): Flow<List<FileEntity>> =
-        fileDao.getFilesByParent(parentId, userId)
+        fileDao.getFilesByParent(parentId, userId).map { fileList ->
+            // Aggregate multipart chunks (e.g. video.mp4.part1, video.mp4.part2)
+            // Group by originalFileName (if multipart) OR id (if normal file/folder)
+            val aggregatedFiles = fileList.groupBy { file ->
+                if (file.isMultipart && file.originalFileName != null) file.originalFileName else file.id
+            }.map { (key, group) ->
+                if (group.size == 1) {
+                    // Normal file or a multipart file with only 1 chunk found
+                    group.first()
+                } else {
+                    // Aggregate multiple chunks into one conceptual file
+                    val firstChunk = group.minByOrNull { it.partIndex ?: Int.MAX_VALUE } ?: group.first()
+                    val totalSize = group.filter { it.size != null }.sumOf { it.size!! }
+                    
+                    // Return the base file but with the combined total size and clean name
+                    firstChunk.copy(
+                        name = firstChunk.originalFileName ?: firstChunk.name,
+                        size = totalSize
+                    )
+                }
+            }
+            aggregatedFiles
+        }
 
     override suspend fun getSavedMessagesHistory(): List<TdApi.Message> {
         // 1. Get current user ID
