@@ -1,5 +1,6 @@
 package com.sinxn.teledrive.ui.screens.home
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -154,5 +155,10 @@ class HomeViewModel @Inject constructor(
 
     fun toggleViewMode() {
         _isGridView.value = !_isGridView.value
+    }
+
+    fun onFileSelectedForUpload(uri: Uri) {
+        // Placeholder for Story 4.2
+        Log.d("HomeViewModel", "User selected file for upload: $uri")
     }
 }
