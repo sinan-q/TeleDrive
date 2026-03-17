@@ -9,15 +9,19 @@ import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
+import android.app.Application
+import com.sinxn.teledrive.utils.FileUtils
 
 sealed class HomeUiState {
     data object Loading : HomeUiState()
@@ -29,7 +33,8 @@ sealed class HomeUiState {
 class HomeViewModel @Inject constructor(
     private val fileRepository: FileRepository,
     private val telegramClient: TelegramClient,
-    private val securePrefs: SecurePrefs
+    private val securePrefs: SecurePrefs,
+    private val application: Application
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
@@ -166,7 +171,24 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onFileSelectedForUpload(uri: Uri) {
-        // Placeholder for Story 4.2
-        Log.d("HomeViewModel", "User selected file for upload: $uri")
+        viewModelScope.launch {
+            try {
+                // 1. Resolve Android Content Uri to a physical file in cache directory
+                val tempFile = withContext(Dispatchers.IO) {
+                    FileUtils.resolveUriToTempFile(application, uri)
+                }
+                
+                if (tempFile != null) {
+                    Log.d("HomeViewModel", "Uri resolved to: ${tempFile.absolutePath}")
+                    // 2. Trigger TDLib Upload matching our generic file document logic
+                    fileRepository.uploadFile(tempFile.absolutePath, userId)
+                } else {
+                    Log.e("HomeViewModel", "Failed to resolve file Uri for upload")
+                    // Could optionally show a UI Error Toast here
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error processing file upload", e)
+            }
+        }
     }
 }

@@ -45,4 +45,9 @@ interface FileRepository {
 
     /** Get total storage used by a user (sum of file sizes in bytes). */
     suspend fun getStorageUsed(userId: String): Long
+    
+    /**
+     * Uploads a physical file on the device to a specified chat (e.g. Saved Messages).
+     */
+    suspend fun uploadFile(filePath: String, userId: String)
 }

@@ -1,5 +1,6 @@
 package com.sinxn.teledrive.data.repository
 
+import android.util.Log
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.telegram.TelegramClient
@@ -69,4 +70,47 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun getStorageUsed(userId: String): Long =
         fileDao.getStorageUsed(userId)
+
+    override suspend fun uploadFile(filePath: String, userId: String) {
+        try {
+            // Get our own ID to figure out the private chat ID (Saved Messages)
+            val chat = telegramClient.send(
+                TdApi.CreatePrivateChat(userId.toLong(), true)
+            ) as TdApi.Chat
+            val savedMessagesChatId = chat.id
+
+            // Create InputFileLocal pointing to the physical file on device
+            val inputFile = TdApi.InputFileLocal(filePath)
+            
+            // Wrap it in an InputMessageDocument to upload as a generic file
+            val inputMessageContent = TdApi.InputMessageDocument(
+                inputFile,
+                null,           // thumbnail
+                true,           // disableContentTypeDetection
+                null            // caption
+            )
+
+            // Fire the SendMessage request 
+            val sendMessage = TdApi.SendMessage(
+                savedMessagesChatId,
+                null,           // messageThreadId / replyToMessageId equivalent
+                null,           // replyTo
+                null,           // options
+                null,           // replyMarkup
+                inputMessageContent
+            )
+
+            // SendAsync delegates the blocking chunk/upload work to TDLib's internal workers
+            telegramClient.sendAsync(sendMessage) { result ->
+                if (result is TdApi.Error) {
+                    Log.e("FileRepositoryImpl", "Failed to queue upload: ${result.message}")
+                } else {
+                    Log.d("FileRepositoryImpl", "Upload successfully queued to TDLib!")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("FileRepositoryImpl", "Error initiating file upload", e)
+            throw e
+        }
+    }
 }
