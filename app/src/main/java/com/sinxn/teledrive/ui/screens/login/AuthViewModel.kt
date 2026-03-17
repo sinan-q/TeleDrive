@@ -28,6 +28,10 @@ class AuthViewModel @Inject constructor(
         authManager.sendPhoneNumber(phoneNumber)
     }
 
+    fun requestQrCodeLogin() {
+        authManager.requestQrCodeLogin()
+    }
+
     fun sendCode(code: String) {
         authManager.sendCode(code)
     }

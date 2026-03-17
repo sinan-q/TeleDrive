@@ -69,6 +69,9 @@ class AuthManager @Inject constructor(
             is TdApi.AuthorizationStateWaitPassword -> {
                 _authState.value = AuthState.WaitPassword(state.passwordHint, state.hasRecoveryEmailAddress)
             }
+            is TdApi.AuthorizationStateWaitOtherDeviceConfirmation -> {
+                _authState.value = AuthState.WaitQrCodeConfirmation(state.link)
+            }
             is TdApi.AuthorizationStateReady -> {
                 _authState.value = AuthState.Ready
             }
@@ -126,6 +129,24 @@ class AuthManager @Inject constructor(
                 _authState.value = AuthState.Error(result.message)
             }
             // On success, TDLib sends UpdateAuthorizationState → WaitCode automatically
+        }
+    }
+
+    /**
+     * Request QR Code Login mode instead of phone number.
+     * Can be called when the state is WaitPhoneNumber.
+     */
+    fun requestQrCodeLogin() {
+        _authState.value = AuthState.Loading
+        // Pass empty Array of Long to indicate no specific user UUIDs
+        telegramClient.sendAsync(
+            TdApi.RequestQrCodeAuthentication(LongArray(0))
+        ) { result ->
+            if (result is TdApi.Error) {
+                Log.e(TAG, "RequestQrCodeAuthentication failed: ${result.message}")
+                _authState.value = AuthState.Error(result.message)
+            }
+            // On success, TDLib sends WaitOtherDeviceConfirmation which has the tg://login link
         }
     }
 

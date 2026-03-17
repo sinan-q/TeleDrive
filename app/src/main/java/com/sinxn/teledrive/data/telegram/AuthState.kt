@@ -26,6 +26,11 @@ sealed class AuthState {
         val emailPattern: String
     ) : AuthState()
 
+    /** TDLib is waiting for another device to confirm the QR code login. */
+    data class WaitQrCodeConfirmation(
+        val link: String
+    ) : AuthState()
+
     /** User is fully authenticated. */
     data object Ready : AuthState()
 

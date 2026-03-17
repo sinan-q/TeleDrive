@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.lightspark.composeqr.QrCodeView
 import com.sinxn.teledrive.data.telegram.AuthState
 
 @Composable
@@ -98,7 +100,13 @@ fun LoginScreen(
                     }
                     is AuthState.WaitPhoneNumber -> {
                         PhoneNumberInput(
-                            onSubmit = { viewModel.sendPhoneNumber(it) }
+                            onSubmit = { viewModel.sendPhoneNumber(it) },
+                            onRequestQrCode = { viewModel.requestQrCodeLogin() }
+                        )
+                    }
+                    is AuthState.WaitQrCodeConfirmation -> {
+                        QrCodeInput(
+                            link = state.link
                         )
                     }
                     is AuthState.WaitCode -> {
@@ -124,7 +132,8 @@ fun LoginScreen(
                     is AuthState.Error -> {
                         // Show the last input step again based on what makes sense
                         PhoneNumberInput(
-                            onSubmit = { viewModel.sendPhoneNumber(it) }
+                            onSubmit = { viewModel.sendPhoneNumber(it) },
+                            onRequestQrCode = { viewModel.requestQrCodeLogin() }
                         )
                     }
                     else -> {
@@ -155,7 +164,10 @@ private fun LoadingContent() {
 }
 
 @Composable
-private fun PhoneNumberInput(onSubmit: (String) -> Unit) {
+private fun PhoneNumberInput(
+    onSubmit: (String) -> Unit,
+    onRequestQrCode: () -> Unit
+) {
     var phoneNumber by rememberSaveable { mutableStateOf("") }
 
     Column(
@@ -203,6 +215,13 @@ private fun PhoneNumberInput(onSubmit: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Continue")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(onClick = onRequestQrCode) {
+            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("Log in by QR Code")
         }
     }
 }
@@ -367,5 +386,41 @@ private fun RecoveryCodeInput(emailPattern: String, onSubmit: (String) -> Unit) 
         ) {
             Text("Submit Code")
         }
+    }
+}
+
+@Composable
+private fun QrCodeInput(link: String) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Default.Share,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Log in to TeleDrive",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "Open Telegram on your phone -> Settings -> Devices -> Link Desktop Device, and scan this code.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        // Render the TDLib QR Code link
+        QrCodeView(
+            data = link,
+            modifier = Modifier.size(240.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
     }
 }
