@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,7 +26,8 @@ sealed class HomeUiState {
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val fileRepository: FileRepository,
-    private val telegramClient: TelegramClient
+    private val telegramClient: TelegramClient,
+    private val securePrefs: SecurePrefs
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
@@ -46,14 +48,29 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadFiles() {
-        viewModelScope.launch {
+        // 1. Immediately attempt to load from offline cache to skip Loading spinner
+        val cachedUserId = securePrefs.getUserId()
+        if (cachedUserId != null) {
+            userId = cachedUserId
+            observeCurrentFolder()
+        } else {
             _uiState.value = HomeUiState.Loading
+        }
+
+        // 2. Refresh/Fetch data in the background
+        viewModelScope.launch {
             try {
-                // 1. Get the current user ID to scope our queries
                 val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
-                userId = me.id.toString()
+                val fetchedUserId = me.id.toString()
                 
-                // Temporary debug folder injection to test UI
+                // If it's a new login or previous cache was empty, save it and start observing
+                if (fetchedUserId != userId) {
+                    userId = fetchedUserId
+                    securePrefs.setUserId(userId)
+                    observeCurrentFolder()
+                }
+                
+                // Temporary debug folder injection to test UI (Safe to run multiple times due to REPLACE strategy)
                 try {
                     fileRepository.saveFile(
                         FileEntity(
@@ -66,21 +83,19 @@ class HomeViewModel @Inject constructor(
                     )
                 } catch (e: Exception) { Log.e("HomeViewModel", "Failed to mock folder", e) }
 
-                // 2. Trigger a background sync of remote data -> Room DB
-                launch {
-                    try {
-                        fileRepository.syncSavedMessages(userId)
-                    } catch (e: Exception) {
-                        Log.e("HomeViewModel", "Background sync failed", e)
-                    }
+                // Trigger a background sync of remote data -> Room DB
+                try {
+                    fileRepository.syncSavedMessages(userId)
+                } catch (e: Exception) {
+                    Log.e("HomeViewModel", "Background sync failed", e)
                 }
 
-                // 3. Observe the local database
-                observeCurrentFolder()
-
             } catch (e: Exception) {
-                Log.e("HomeViewModel", "Failed to initialize Home screen", e)
-                _uiState.value = HomeUiState.Error(e.message ?: "Unknown error occurred")
+                Log.e("HomeViewModel", "Failed to sync Home screen data", e)
+                if (cachedUserId == null) {
+                    // Only show full error if we have no cached data to fall back on
+                    _uiState.value = HomeUiState.Error(e.message ?: "Unknown error occurred")
+                }
             }
         }
     }

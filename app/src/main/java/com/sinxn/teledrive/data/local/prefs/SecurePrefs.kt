@@ -13,6 +13,9 @@ import javax.inject.Singleton
 interface SecurePrefs {
     fun setHasSession(hasSession: Boolean)
     fun hasSession(): Boolean
+    
+    fun setUserId(userId: String)
+    fun getUserId(): String?
 }
 
 /**
@@ -26,6 +29,7 @@ class SecurePrefsImpl @Inject constructor(
     companion object {
         private const val PREFS_FILE_NAME = "teledrive_secure_prefs"
         private const val KEY_HAS_SESSION = "key_has_session"
+        private const val KEY_USER_ID = "key_user_id"
     }
 
     private val masterKey = MasterKey.Builder(context)
@@ -48,5 +52,15 @@ class SecurePrefsImpl @Inject constructor(
 
     override fun hasSession(): Boolean {
         return sharedPreferences.getBoolean(KEY_HAS_SESSION, false)
+    }
+
+    override fun setUserId(userId: String) {
+        sharedPreferences.edit()
+            .putString(KEY_USER_ID, userId)
+            .apply()
+    }
+
+    override fun getUserId(): String? {
+        return sharedPreferences.getString(KEY_USER_ID, null)
     }
 }
