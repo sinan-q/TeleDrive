@@ -30,6 +30,9 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private val _isGridView = MutableStateFlow(false)
+    val isGridView: StateFlow<Boolean> = _isGridView.asStateFlow()
+
     init {
         loadFiles()
     }
@@ -66,5 +69,9 @@ class HomeViewModel @Inject constructor(
                 _uiState.value = HomeUiState.Error(e.message ?: "Unknown error occurred")
             }
         }
+    }
+
+    fun toggleViewMode() {
+        _isGridView.value = !_isGridView.value
     }
 }

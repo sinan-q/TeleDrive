@@ -1,17 +1,15 @@
 package com.sinxn.teledrive.ui.screens.home
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
+import com.sinxn.teledrive.ui.screens.home.components.FileListView
+import com.sinxn.teledrive.ui.screens.home.components.FileGridView
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,11 +35,19 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isGridView by viewModel.isGridView.collectAsState()
+    
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("TeleDrive") },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleViewMode() }) {
+                        Icon(
+                            imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
+                            contentDescription = "Toggle View"
+                        )
+                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -72,36 +78,21 @@ fun HomeScreen(
                             modifier = Modifier.align(Alignment.Center)
                         )
                     } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(state.files) { file ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                ) {
-                                    Text(
-                                        text = file.name,
-                                        style = MaterialTheme.typography.titleMedium
-                                    )
-                                    val sizeStr = file.size?.let { s -> 
-                                        if(s < 1024) "$s B" else {
-                                            val z = (63 - java.lang.Long.numberOfLeadingZeros(s)) / 10
-                                            String.format("%.1f %sB", s.toDouble() / (1L shl (z * 10)), " KMGTPE"[z])
-                                        }
-                                    } ?: "Unknown size"
-                                    
-                                    Text(
-                                        text = "Size: $sizeStr",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                    Text(
-                                        text = "Type: ${file.mimeType ?: "Unknown"}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                        AnimatedContent(targetState = isGridView, label = "view_toggle") { gridMode ->
+                            if (gridMode) {
+                                FileGridView(
+                                    files = state.files,
+                                    onFileClick = { file ->
+                                        if (file.type == "folder") onNavigateToFolder(file.id)
+                                    }
+                                )
+                            } else {
+                                FileListView(
+                                    files = state.files,
+                                    onFileClick = { file ->
+                                        if (file.type == "folder") onNavigateToFolder(file.id)
+                                    }
+                                )
                             }
                         }
                     }
