@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import java.util.UUID
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 
@@ -70,19 +71,6 @@ class HomeViewModel @Inject constructor(
                     securePrefs.setUserId(userId)
                     observeCurrentFolder()
                 }
-                
-                // Temporary debug folder injection to test UI (Safe to run multiple times due to REPLACE strategy)
-                try {
-                    fileRepository.saveFile(
-                        FileEntity(
-                            id = "debug_folder_1",
-                            name = "Test Virtual Folder",
-                            type = "folder",
-                            userId = userId,
-                            parentId = null
-                        )
-                    )
-                } catch (e: Exception) { Log.e("HomeViewModel", "Failed to mock folder", e) }
 
                 // Trigger a background sync of remote data -> Room DB
                 try {
@@ -155,6 +143,26 @@ class HomeViewModel @Inject constructor(
 
     fun toggleViewMode() {
         _isGridView.value = !_isGridView.value
+    }
+
+    fun createFolder(name: String) {
+        val folderName = name.trim().takeIf { it.isNotEmpty() } ?: "New Folder"
+        val newFolder = FileEntity(
+            id = "folder_${UUID.randomUUID()}",
+            name = folderName,
+            type = "folder",
+            userId = userId,
+            parentId = currentFolder.value?.id
+        )
+        
+        viewModelScope.launch {
+            try {
+                fileRepository.saveFile(newFolder)
+                Log.d("HomeViewModel", "Created virtual folder: ${newFolder.name}")
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Failed to create folder", e)
+            }
+        }
     }
 
     fun onFileSelectedForUpload(uri: Uri) {

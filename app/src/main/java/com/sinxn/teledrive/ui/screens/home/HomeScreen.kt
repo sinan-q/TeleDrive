@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import com.sinxn.teledrive.ui.screens.home.components.BreadcrumbsBar
+import com.sinxn.teledrive.ui.screens.home.components.CreateFolderDialog
 import com.sinxn.teledrive.ui.screens.home.components.FileListView
 import com.sinxn.teledrive.ui.screens.home.components.FileGridView
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -23,10 +26,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -49,6 +54,8 @@ fun HomeScreen(
         viewModel.navigateUp()
     }
 
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+
     // Launcher for Android System File Picker
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -67,6 +74,9 @@ fun HomeScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = { showCreateFolderDialog = true }) {
+                        Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
+                    }
                     IconButton(onClick = { viewModel.toggleViewMode() }) {
                         Icon(
                             imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
@@ -139,5 +149,14 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismissRequest = { showCreateFolderDialog = false },
+            onCreateFolder = { folderName ->
+                viewModel.createFolder(folderName)
+            }
+        )
     }
 }
