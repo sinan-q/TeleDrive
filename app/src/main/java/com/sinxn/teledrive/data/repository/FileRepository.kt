@@ -12,6 +12,11 @@ interface FileRepository {
     /** Observe files within a folder (null parentId = root). */
     fun getFilesByParent(parentId: String?, userId: String): Flow<List<FileEntity>>
 
+    /**
+     * Fetches the recent history of the "Saved Messages" chat directly from TDLib.
+     */
+    suspend fun getSavedMessagesHistory(): List<org.drinkless.tdlib.TdApi.Message>
+
     /** Get a single file by its ID. */
     suspend fun getFileById(id: String): FileEntity?
 

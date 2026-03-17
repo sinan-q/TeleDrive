@@ -2,7 +2,9 @@ package com.sinxn.teledrive.data.repository
 
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import com.sinxn.teledrive.data.telegram.TelegramClient
 import kotlinx.coroutines.flow.Flow
+import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,11 +15,29 @@ import javax.inject.Singleton
  */
 @Singleton
 class FileRepositoryImpl @Inject constructor(
-    private val fileDao: FileDao
+    private val fileDao: FileDao,
+    private val telegramClient: TelegramClient
 ) : FileRepository {
 
     override fun getFilesByParent(parentId: String?, userId: String): Flow<List<FileEntity>> =
         fileDao.getFilesByParent(parentId, userId)
+
+    override suspend fun getSavedMessagesHistory(): List<TdApi.Message> {
+        // 1. Get current user ID
+        val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
+        val myUserId = me.id
+
+        // 2. Chat ID for Saved Messages is essentially a private chat with yourself
+        val chat = telegramClient.send(TdApi.CreatePrivateChat(myUserId, true)) as TdApi.Chat
+        val savedMessagesChatId = chat.id
+
+        // 3. Fetch history
+        // fromMessageId = 0 (get from the end), offset = 0, limit = 100
+        val historyParams = TdApi.GetChatHistory(savedMessagesChatId, 0, 0, 100, false)
+        val messagesResult = telegramClient.send(historyParams) as TdApi.Messages
+
+        return messagesResult.messages.toList()
+    }
 
     override suspend fun getFileById(id: String): FileEntity? =
         fileDao.getFileById(id)
