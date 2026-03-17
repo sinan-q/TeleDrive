@@ -2,10 +2,22 @@ package com.sinxn.teledrive.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// TeleDrive Brand Colors
+val TeleDriveBlue = Color(0xFF0088CC)
+val TeleDriveBlueDark = Color(0xFF33A1D7) // Slightly lighter for dark mode contrast
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Backgrounds
+val DarkBackground = Color(0xFF1F1F1F)
+val DarkSurface = Color(0xFF2C2C2C)
+val LightBackground = Color(0xFFFFFFFF)
+val LightSurface = Color(0xFFF0F2F5) // From web dashboard background
+
+// Text Colors
+val TextPrimaryDark = Color(0xFFFFFFFF)
+val TextSecondaryDark = Color(0xB3FFFFFF) // 70% opacity white
+val TextPrimaryLight = Color(0xFF000000)
+val TextSecondaryLight = Color(0x8A000000) // 54% opacity black
+
+// States
+val ErrorRed = Color(0xFFE53935)
+val SuccessGreen = Color(0xFF43A047)
