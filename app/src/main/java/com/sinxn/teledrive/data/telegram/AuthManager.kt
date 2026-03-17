@@ -67,7 +67,7 @@ class AuthManager @Inject constructor(
                 _authState.value = AuthState.WaitCode(codeType)
             }
             is TdApi.AuthorizationStateWaitPassword -> {
-                _authState.value = AuthState.WaitPassword(state.passwordHint)
+                _authState.value = AuthState.WaitPassword(state.passwordHint, state.hasRecoveryEmailAddress)
             }
             is TdApi.AuthorizationStateReady -> {
                 _authState.value = AuthState.Ready
@@ -155,6 +155,48 @@ class AuthManager @Inject constructor(
         ) { result ->
             if (result is TdApi.Error) {
                 Log.e(TAG, "CheckAuthenticationPassword failed: ${result.message}")
+                // Restore WaitPassword state so the user can try again
+                val prevState = authState.value
+                val hint = if (prevState is AuthState.WaitPassword) prevState.passwordHint else ""
+                val hasEmail = if (prevState is AuthState.WaitPassword) prevState.hasRecoveryEmail else false
+                
+                // Set error temporarily, then revert to input state so UI shows error and input
+                _authState.value = AuthState.Error(result.message)
+                _authState.value = AuthState.WaitPassword(hint, hasEmail)
+            }
+        }
+    }
+
+    /**
+     * Request a password recovery code via email.
+     */
+    fun requestPasswordRecovery() {
+        _authState.value = AuthState.Loading
+        telegramClient.sendAsync(
+            TdApi.RequestAuthenticationPasswordRecovery()
+        ) { result ->
+            if (result is TdApi.Error) {
+                Log.e(TAG, "RequestAuthenticationPasswordRecovery failed: ${result.message}")
+                _authState.value = AuthState.Error(result.message)
+            } else if (result is TdApi.EmailAddressAuthenticationCodeInfo) {
+                // TDLib successfully sent the code
+                _authState.value = AuthState.WaitPasswordRecoveryCode(result.emailAddressPattern)
+            }
+        }
+    }
+
+    /**
+     * Submit the password recovery code sent to the user's email.
+     */
+    fun recoverPassword(recoveryCode: String) {
+        _authState.value = AuthState.Loading
+        // Providing empty newPassword enables them to login without 2FA,
+        // or they can set it up again later.
+        telegramClient.sendAsync(
+            TdApi.RecoverAuthenticationPassword(recoveryCode, "", "")
+        ) { result ->
+            if (result is TdApi.Error) {
+                Log.e(TAG, "RecoverAuthenticationPassword failed: ${result.message}")
                 _authState.value = AuthState.Error(result.message)
             }
         }

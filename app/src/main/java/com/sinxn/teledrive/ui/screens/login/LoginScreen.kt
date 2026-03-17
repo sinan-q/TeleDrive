@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.Button
@@ -23,6 +24,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -108,7 +110,15 @@ fun LoginScreen(
                     is AuthState.WaitPassword -> {
                         PasswordInput(
                             hint = state.passwordHint,
-                            onSubmit = { viewModel.sendPassword(it) }
+                            hasRecoveryEmail = state.hasRecoveryEmail,
+                            onSubmit = { viewModel.sendPassword(it) },
+                            onRequestRecovery = { viewModel.requestPasswordRecovery() }
+                        )
+                    }
+                    is AuthState.WaitPasswordRecoveryCode -> {
+                        RecoveryCodeInput(
+                            emailPattern = state.emailPattern,
+                            onSubmit = { viewModel.recoverPassword(it) }
                         )
                     }
                     is AuthState.Error -> {
@@ -243,7 +253,12 @@ private fun CodeInput(codeType: String, onSubmit: (String) -> Unit) {
 }
 
 @Composable
-private fun PasswordInput(hint: String, onSubmit: (String) -> Unit) {
+private fun PasswordInput(
+    hint: String,
+    hasRecoveryEmail: Boolean,
+    onSubmit: (String) -> Unit,
+    onRequestRecovery: () -> Unit
+) {
     var password by rememberSaveable { mutableStateOf("") }
 
     Column(
@@ -292,6 +307,65 @@ private fun PasswordInput(hint: String, onSubmit: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Submit")
+        }
+
+        if (hasRecoveryEmail) {
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onRequestRecovery) {
+                Text("Forgot Password?")
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecoveryCodeInput(emailPattern: String, onSubmit: (String) -> Unit) {
+    var code by rememberSaveable { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Default.Email,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Password Recovery",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "We sent a recovery code to $emailPattern",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        OutlinedTextField(
+            value = code,
+            onValueChange = { code = it },
+            label = { Text("Recovery Code") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = { if (code.isNotBlank()) onSubmit(code) }
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = { onSubmit(code) },
+            enabled = code.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Submit Code")
         }
     }
 }

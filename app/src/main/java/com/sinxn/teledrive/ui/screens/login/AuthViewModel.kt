@@ -36,6 +36,14 @@ class AuthViewModel @Inject constructor(
         authManager.sendPassword(password)
     }
 
+    fun requestPasswordRecovery() {
+        authManager.requestPasswordRecovery()
+    }
+
+    fun recoverPassword(recoveryCode: String) {
+        authManager.recoverPassword(recoveryCode)
+    }
+
     fun logout() {
         authManager.logout()
     }
