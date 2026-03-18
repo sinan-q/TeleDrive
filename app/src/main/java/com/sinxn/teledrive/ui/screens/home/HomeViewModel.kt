@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.FileRepository
+import com.sinxn.teledrive.data.telegram.AuthManager
+import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -37,6 +41,7 @@ class HomeViewModel @Inject constructor(
     private val fileRepository: FileRepository,
     private val telegramClient: TelegramClient,
     private val securePrefs: SecurePrefs,
+    private val authManager: AuthManager,
     private val application: Application
 ) : ViewModel() {
 
@@ -74,6 +79,21 @@ class HomeViewModel @Inject constructor(
         // 2. Refresh/Fetch data in the background
         viewModelScope.launch {
             try {
+                // Wait for TDLib to be fully initialized or throw to an input state
+                val finalAuthState = authManager.authState.filter { 
+                    it is AuthState.Ready || it is AuthState.WaitPhoneNumber || it is AuthState.Error
+                }.first()
+
+                if (finalAuthState is AuthState.WaitPhoneNumber) {
+                    securePrefs.setHasSession(false)
+                    _uiState.value = HomeUiState.Error("Session expired. Please log out and log in again.")
+                    return@launch
+                }
+                if (finalAuthState is AuthState.Error) {
+                    _uiState.value = HomeUiState.Error("Authentication error: ${finalAuthState.message}")
+                    return@launch
+                }
+
                 val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
                 val fetchedUserId = me.id.toString()
                 

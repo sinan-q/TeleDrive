@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.rememberNavController
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.navigation.Route
 import com.sinxn.teledrive.navigation.TeleDriveNavHost
 import com.sinxn.teledrive.ui.theme.TeleDriveTheme
@@ -18,8 +19,15 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var securePrefs: SecurePrefs
 
+    @Inject
+    lateinit var authManager: AuthManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Ensure TDLib client is created and listening for updates regardless of starting screen
+        authManager.startClient()
+        
         enableEdgeToEdge()
         setContent {
             TeleDriveTheme {

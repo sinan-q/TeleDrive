@@ -39,8 +39,13 @@ class TelegramClient @Inject constructor() {
     private var client: Client? = null
     
     // Broadcasts all unsolicited updates from Telegram (new messages, auth state, file progress).
-    // extraBufferCapacity allows bursts of events during initialization/sync.
-    private val _updates = MutableSharedFlow<TdApi.Object>(extraBufferCapacity = 100)
+    // replay = 100 ensures that subscribers who attach slightly late (due to coroutine dispatch delays)
+    // don't miss the initial burst of initialization updates from TDLib.
+    private val _updates = MutableSharedFlow<TdApi.Object>(
+        replay = 100, 
+        extraBufferCapacity = 100, 
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
     val updates = _updates.asSharedFlow()
 
     /**
