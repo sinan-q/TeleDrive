@@ -103,16 +103,13 @@ class FileRepositoryImpl @Inject constructor(
                             val entity = update.message.toFileEntity(activeUserId)
                             if (entity != null) {
                                 // Strip .enc extension and restore original metadata if this was our upload
-                                val meta = pendingUploadMeta.remove(entity.name)
+                                val meta = pendingUploadMeta.remove(entity.localName())
                                 val cleanEntity = if (meta != null) {
                                     entity.copy(
                                         name = meta.originalName,
                                         mimeType = meta.mimeType
                                     )
-                                } else if (entity.name.endsWith(".enc")) {
-                                    // Fallback: strip .enc even if we lost the meta map entry
-                                    entity.copy(name = entity.name.removeSuffix(".enc"))
-                                } else entity
+                                } else entity // MessageMapper already strips .enc suffix
 
                                 // Re-attach parent folder mapping using the ORIGINAL name
                                 val parentId = pendingUploadParents.remove(cleanEntity.name)
@@ -122,6 +119,28 @@ class FileRepositoryImpl @Inject constructor(
 
                                 fileDao.insertFile(entityToInsert)
                             }
+                        }
+                    }
+                    is TdApi.UpdateMessageSendSucceeded -> {
+                        val activeUserId = securePrefs.getUserId() ?: return@collect
+                        val oldId = "msg_${update.oldMessageId}"
+                        
+                        // Fetch the temporary record to preserve its folder context (parentId)
+                        val oldEntity = fileDao.getFileById(oldId)
+                        val parentId = oldEntity?.parentId ?: pendingUploadParents.remove(oldEntity?.name ?: "")
+                        
+                        // Create the final entity with the permanent ID
+                        val newEntity = update.message.toFileEntity(activeUserId, parentId)
+                        if (newEntity != null) {
+                            // If it's an encrypted file, try matching original meta to get clean name
+                            val meta = pendingUploadMeta.remove(newEntity.localName())
+                            val cleanEntity = if (meta != null) {
+                                newEntity.copy(name = meta.originalName, mimeType = meta.mimeType)
+                            } else newEntity
+
+                            // Delete the temporary record and insert the final one
+                            fileDao.hardDeleteFile(oldId)
+                            fileDao.insertFile(cleanEntity)
                         }
                     }
                 }
@@ -308,4 +327,14 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun getFolders(userId: String): List<FileEntity> =
         fileDao.getFoldersByUser(userId)
+
+    // ── Helper Extensions ──────────────────────────────────────────
+
+    /**
+     * Extracts the raw filename as it appears in Telegram from a FileEntity.
+     * This is useful for looking up metadata in the pendingUploadMeta map.
+     */
+    private fun FileEntity.localName(): String {
+        return if (this.name.endsWith(".enc")) this.name else "${this.name}.enc"
+    }
 }

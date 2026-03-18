@@ -20,13 +20,17 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
 
     // Helper to evaluate parts
     fun parseMultipart(fileName: String) {
-        val matchResult = partRegex.find(fileName)
+        val cleanName = if (fileName.endsWith(".enc")) {
+            fileName.removeSuffix(".enc")
+        } else fileName
+
+        val matchResult = partRegex.find(cleanName)
         if (matchResult != null) {
             isMultipart = true
             originalFileName = matchResult.groupValues[1]
             partIndex = matchResult.groupValues[2].toIntOrNull()
         } else {
-            originalFileName = fileName
+            originalFileName = cleanName
         }
     }
 
