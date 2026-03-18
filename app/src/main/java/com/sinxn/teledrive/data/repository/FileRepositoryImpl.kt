@@ -36,6 +36,9 @@ class FileRepositoryImpl @Inject constructor(
     /** Track file IDs that we explicitly asked TDLib to download this session */
     private val pendingDownloads = mutableSetOf<Int>()
 
+    /** Maps a pending upload's raw file name back to its target folder's parentId */
+    private val pendingUploadParents = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     init {
         scope.launch {
             telegramClient.updates.collect { update ->
@@ -75,9 +78,15 @@ class FileRepositoryImpl @Inject constructor(
                         if (activeUserId != null) {
                             val entity = update.message.toFileEntity(activeUserId)
                             if (entity != null) {
+                                // If we initiated this upload from a specific folder, re-attach its parent mapping
+                                val parentId = pendingUploadParents.remove(entity.name)
+                                val entityToInsert = if (parentId != null) {
+                                    entity.copy(parentId = parentId)
+                                } else entity
+
                                 // Auto-insert new finished uploads or remote syncs into Room directly.
                                 // Room's IGNORE strategy ensures we don't clobber existing ones.
-                                fileDao.insertFile(entity)
+                                fileDao.insertFile(entityToInsert)
                             }
                         }
                     }
@@ -175,8 +184,13 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun getStorageUsed(userId: String): Long =
         fileDao.getStorageUsed(userId)
 
-    override suspend fun uploadFile(filePath: String, userId: String) {
+    override suspend fun uploadFile(filePath: String, userId: String, parentId: String?) {
         try {
+            if (parentId != null) {
+                val fileName = java.io.File(filePath).name
+                pendingUploadParents[fileName] = parentId
+            }
+
             // Get our own ID to figure out the private chat ID (Saved Messages)
             val chat = telegramClient.send(
                 TdApi.CreatePrivateChat(userId.toLong(), true)

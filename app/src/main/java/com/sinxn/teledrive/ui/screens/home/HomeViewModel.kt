@@ -77,7 +77,8 @@ class HomeViewModel @Inject constructor(
                 
                 if (tempFile != null) {
                     // Start upload; the new FileRepository update listener will catch it when TDLib finishes
-                    fileRepository.uploadFile(tempFile.absolutePath, activeUserId)
+                    val currentParentId = currentFolder.value?.id
+                    fileRepository.uploadFile(tempFile.absolutePath, activeUserId, currentParentId)
                     _snackbarEvents.emit("Uploading \"${tempFile.name}\"...")
                 } else {
                     _snackbarEvents.emit("Could not read the selected file")

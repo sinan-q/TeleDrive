@@ -49,7 +49,7 @@ interface FileRepository {
     /**
      * Uploads a physical file on the device to a specified chat (e.g. Saved Messages).
      */
-    suspend fun uploadFile(filePath: String, userId: String)
+    suspend fun uploadFile(filePath: String, userId: String, parentId: String? = null)
 
     /**
      * Triggers TDLib to download the file into its internal cache.
