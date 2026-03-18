@@ -37,6 +37,12 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
     return when (val content = this.content) {
         is TdApi.MessageDocument -> {
             val fileName = content.document.fileName.takeIf { it.isNotBlank() } ?: "Unknown Document"
+            
+            // Only accept encrypted files uploaded by TeleDrive
+            if (!fileName.endsWith(".enc", ignoreCase = true)) {
+                return null
+            }
+            
             parseMultipart(fileName)
             
             FileEntity(
@@ -57,88 +63,11 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
                 updatedAt = createdAtMs
             )
         }
-        is TdApi.MessagePhoto -> {
-            // Pick the largest photo size for metadata
-            val largestPhoto = content.photo.sizes.maxByOrNull { it.photo.expectedSize }
-            FileEntity(
-                id = entityId,
-                name = "Photo_${this.date}.jpg",
-                type = "file",
-                mimeType = "image/jpeg",
-                size = largestPhoto?.photo?.expectedSize?.toLong() ?: 0L,
-                messageId = this.id.toString(),
-                fileId = largestPhoto?.photo?.id?.toString(),
-                parentId = parentId,
-                userId = userId,
-                uploadedAt = createdAtMs,
-                createdAt = createdAtMs,
-                updatedAt = createdAtMs
-            )
-        }
-        is TdApi.MessageVideo -> {
-            val fileName = content.video.fileName.takeIf { it.isNotBlank() } ?: "Video_${this.date}.mp4"
-            parseMultipart(fileName)
-            
-            FileEntity(
-                id = entityId,
-                name = fileName,
-                type = "file",
-                mimeType = content.video.mimeType,
-                isMultipart = isMultipart,
-                partIndex = partIndex,
-                originalFileName = originalFileName,
-                size = content.video.video.expectedSize.toLong(),
-                messageId = this.id.toString(),
-                fileId = content.video.video.id.toString(),
-                parentId = parentId,
-                userId = userId,
-                uploadedAt = createdAtMs,
-                createdAt = createdAtMs,
-                updatedAt = createdAtMs
-            )
-        }
-        is TdApi.MessageAudio -> {
-            val title = content.audio.title.takeIf { it.isNotBlank() }
-            val performer = content.audio.performer.takeIf { it.isNotBlank() }
-            val fileName = if (title != null && performer != null) "$performer - $title"
-            else title ?: content.audio.fileName.takeIf { it.isNotBlank() } ?: "Audio_${this.date}.mp3"
-
-            parseMultipart(fileName)
-
-            FileEntity(
-                id = entityId,
-                name = fileName,
-                type = "file",
-                mimeType = content.audio.mimeType,
-                isMultipart = isMultipart,
-                partIndex = partIndex,
-                originalFileName = originalFileName,
-                size = content.audio.audio.expectedSize.toLong(),
-                messageId = this.id.toString(),
-                fileId = content.audio.audio.id.toString(),
-                parentId = parentId,
-                userId = userId,
-                uploadedAt = createdAtMs,
-                createdAt = createdAtMs,
-                updatedAt = createdAtMs
-            )
-        }
-        is TdApi.MessageVoiceNote -> {
-            FileEntity(
-                id = entityId,
-                name = "Voice_Note_${this.date}.ogg",
-                type = "file",
-                mimeType = content.voiceNote.mimeType,
-                size = content.voiceNote.voice.expectedSize.toLong(),
-                messageId = this.id.toString(),
-                fileId = content.voiceNote.voice.id.toString(),
-                parentId = parentId,
-                userId = userId,
-                uploadedAt = createdAtMs,
-                createdAt = createdAtMs,
-                updatedAt = createdAtMs
-            )
-        }
+        // Ignore all other content types as TeleDrive uploads everything as encrypted documents
+        is TdApi.MessagePhoto -> null
+        is TdApi.MessageVideo -> null
+        is TdApi.MessageAudio -> null
+        is TdApi.MessageVoiceNote -> null
         else -> null // Unsupported message type (e.g., text, stickers)
     }
 }

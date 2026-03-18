@@ -173,28 +173,7 @@ class FileRepositoryImpl @Inject constructor(
             aggregatedFiles
         }
 
-    override suspend fun getSavedMessagesHistory(): List<TdApi.Message> {
-        // 1. Get current user ID
-        val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
-        val myUserId = me.id
 
-        // 2. Chat ID for Saved Messages is essentially a private chat with yourself
-        val chat = telegramClient.send(TdApi.CreatePrivateChat(myUserId, true)) as TdApi.Chat
-        val savedMessagesChatId = chat.id
-
-        // 3. Fetch history
-        // fromMessageId = 0 (get from the end), offset = 0, limit = 100
-        val historyParams = TdApi.GetChatHistory(savedMessagesChatId, 0, 0, 100, false)
-        val messagesResult = telegramClient.send(historyParams) as TdApi.Messages
-
-        return messagesResult.messages.toList()
-    }
-
-    override suspend fun syncSavedMessages(userId: String) {
-        val messages = getSavedMessagesHistory()
-        val fileEntities = messages.mapNotNull { it.toFileEntity(userId) }
-        fileDao.insertFiles(fileEntities)
-    }
 
     override suspend fun getFileById(id: String): FileEntity? =
         fileDao.getFileById(id)

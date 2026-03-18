@@ -147,13 +147,6 @@ class HomeViewModel @Inject constructor(
                     observeCurrentFolder()
                 }
 
-                // Trigger a background sync of remote data -> Room DB
-                try {
-                    fileRepository.syncSavedMessages(userId)
-                } catch (e: Exception) {
-                    Log.e("HomeViewModel", "Background sync failed", e)
-                }
-
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Failed to sync Home screen data", e)
                 if (cachedUserId == null) {
