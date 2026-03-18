@@ -32,7 +32,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             TeleDriveTheme {
                 val navController = rememberNavController()
-                val startDest = if (secu    rePrefs.hasSession()) Route.MasterPassword else Route.Login
+                val startDest = if (securePrefs.hasSession()) Route.MasterPassword else Route.Login
 
                 TeleDriveNavHost(
                     navController = navController,

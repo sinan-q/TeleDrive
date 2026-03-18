@@ -11,6 +11,7 @@ import com.sinxn.teledrive.ui.screens.login.LoginScreen
 import com.sinxn.teledrive.ui.screens.masterpassword.MasterPasswordScreen
 import com.sinxn.teledrive.ui.screens.settings.SettingsScreen
 import com.sinxn.teledrive.ui.screens.folder.FolderViewScreen
+import com.sinxn.teledrive.ui.screens.storageselection.StorageSelectionScreen
 
 @Composable
 fun TeleDriveNavHost(
@@ -26,8 +27,18 @@ fun TeleDriveNavHost(
         composable<Route.Login> {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate(Route.MasterPassword) {
+                    navController.navigate(Route.StorageSelection) {
                         popUpTo(Route.Login) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable<Route.StorageSelection> {
+            StorageSelectionScreen(
+                onContinue = {
+                    navController.navigate(Route.MasterPassword) {
+                        popUpTo(Route.StorageSelection) { inclusive = true }
                     }
                 }
             )

@@ -12,6 +12,9 @@ sealed interface Route {
     data object Login : Route
 
     @Serializable
+    data object StorageSelection : Route
+
+    @Serializable
     data object MasterPassword : Route
 
     @Serializable
