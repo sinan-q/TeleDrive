@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ErrorProne annotations are often missing at runtime and used for static analysis.
+-dontwarn com.google.errorprone.annotations.**
