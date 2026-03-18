@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             TeleDriveTheme {
                 val navController = rememberNavController()
-                val startDest = if (securePrefs.hasSession()) Route.Home else Route.Login
+                val startDest = if (securePrefs.hasSession()) Route.MasterPassword else Route.Login
 
                 TeleDriveNavHost(
                     navController = navController,

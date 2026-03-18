@@ -221,6 +221,10 @@ class FileRepositoryImpl @Inject constructor(
             // SendAsync delegates the blocking chunk/upload work to TDLib's internal workers
             telegramClient.sendAsync(sendMessage) { result ->
                 if (result is TdApi.Error) {
+                    if (parentId != null) {
+                        val fileName = java.io.File(filePath).name
+                        pendingUploadParents.remove(fileName)
+                    }
                     Log.e("FileRepositoryImpl", "Failed to queue upload: ${result.message}")
                 } else {
                     Log.d("FileRepositoryImpl", "Upload successfully queued to TDLib!")

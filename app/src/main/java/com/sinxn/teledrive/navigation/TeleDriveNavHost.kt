@@ -8,6 +8,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.sinxn.teledrive.ui.screens.home.HomeScreen
 import com.sinxn.teledrive.ui.screens.login.LoginScreen
+import com.sinxn.teledrive.ui.screens.masterpassword.MasterPasswordScreen
 import com.sinxn.teledrive.ui.screens.settings.SettingsScreen
 import com.sinxn.teledrive.ui.screens.folder.FolderViewScreen
 
@@ -25,8 +26,18 @@ fun TeleDriveNavHost(
         composable<Route.Login> {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate(Route.Home) {
+                    navController.navigate(Route.MasterPassword) {
                         popUpTo(Route.Login) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable<Route.MasterPassword> {
+            MasterPasswordScreen(
+                onUnlocked = {
+                    navController.navigate(Route.Home) {
+                        popUpTo(Route.MasterPassword) { inclusive = true }
                     }
                 }
             )
@@ -61,3 +72,4 @@ fun TeleDriveNavHost(
         }
     }
 }
+

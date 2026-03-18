@@ -16,6 +16,21 @@ interface SecurePrefs {
     
     fun setUserId(userId: String)
     fun getUserId(): String?
+
+    /** Returns true if the user has set a master encryption password */
+    fun hasMasterPassword(): Boolean
+
+    /** Store a verification hash + salt for the master password */
+    fun setMasterPasswordHash(hash: String, salt: String)
+
+    /** Get the stored password verification hash */
+    fun getMasterPasswordHash(): String?
+
+    /** Get the stored PBKDF2 salt (Base64-encoded 16 bytes) */
+    fun getMasterPasswordSalt(): String?
+
+    /** Clear the master password (used during logout / reset) */
+    fun clearMasterPassword()
 }
 
 /**
@@ -30,6 +45,8 @@ class SecurePrefsImpl @Inject constructor(
         private const val PREFS_FILE_NAME = "teledrive_secure_prefs"
         private const val KEY_HAS_SESSION = "key_has_session"
         private const val KEY_USER_ID = "key_user_id"
+        private const val KEY_MASTER_PW_HASH = "key_master_pw_hash"
+        private const val KEY_MASTER_PW_SALT = "key_master_pw_salt"
     }
 
     private val masterKey = MasterKey.Builder(context)
@@ -62,5 +79,31 @@ class SecurePrefsImpl @Inject constructor(
 
     override fun getUserId(): String? {
         return sharedPreferences.getString(KEY_USER_ID, null)
+    }
+
+    override fun hasMasterPassword(): Boolean {
+        return sharedPreferences.getString(KEY_MASTER_PW_HASH, null) != null
+    }
+
+    override fun setMasterPasswordHash(hash: String, salt: String) {
+        sharedPreferences.edit()
+            .putString(KEY_MASTER_PW_HASH, hash)
+            .putString(KEY_MASTER_PW_SALT, salt)
+            .apply()
+    }
+
+    override fun getMasterPasswordHash(): String? {
+        return sharedPreferences.getString(KEY_MASTER_PW_HASH, null)
+    }
+
+    override fun getMasterPasswordSalt(): String? {
+        return sharedPreferences.getString(KEY_MASTER_PW_SALT, null)
+    }
+
+    override fun clearMasterPassword() {
+        sharedPreferences.edit()
+            .remove(KEY_MASTER_PW_HASH)
+            .remove(KEY_MASTER_PW_SALT)
+            .apply()
     }
 }
