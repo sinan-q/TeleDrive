@@ -382,7 +382,7 @@ class FileRepositoryImpl @Inject constructor(
             }
             
             Log.d("FileRepositoryImpl", "Sync completed. Total files found and added: $totalSynced")
-            _syncStatus.value = SyncStatus.Completed
+            _syncStatus.value = SyncStatus.Completed(totalSynced)
         } catch (e: Exception) {
             Log.e("FileRepositoryImpl", "Error syncing existing files", e)
             _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during sync")

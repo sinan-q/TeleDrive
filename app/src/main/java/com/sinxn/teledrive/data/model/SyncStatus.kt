@@ -11,7 +11,7 @@ sealed class SyncStatus {
     data class Syncing(val processedCount: Int) : SyncStatus()
 
     /** Crawler finished successfully. */
-    object Completed : SyncStatus()
+    data class Completed(val importedCount: Int) : SyncStatus()
 
     /** Crawler failed with an error. */
     data class Error(val message: String) : SyncStatus()

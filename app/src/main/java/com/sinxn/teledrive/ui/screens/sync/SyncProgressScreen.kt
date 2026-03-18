@@ -89,7 +89,7 @@ fun SyncProgressScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Your previous files have been successfully linked to this device.",
+                                text = "Successfully imported ${status.importedCount} encrypted files from your storage.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
