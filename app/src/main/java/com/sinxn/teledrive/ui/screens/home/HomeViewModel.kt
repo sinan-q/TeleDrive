@@ -104,6 +104,7 @@ class HomeViewModel @Inject constructor(
 
     /** Retry initial load/sync — called from the error state UI */
     fun retrySync() {
+        _uiState.value = HomeUiState.Loading
         loadFiles()
     }
 
@@ -176,9 +177,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 fileRepository.saveFile(newFolder)
-                Log.d("HomeViewModel", "Created virtual folder: ${newFolder.name}")
+                _snackbarEvents.emit("Folder \"$folderName\" created")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Failed to create folder", e)
+                _snackbarEvents.emit("Failed to create folder")
             }
         }
     }
@@ -186,21 +188,19 @@ class HomeViewModel @Inject constructor(
     fun onFileSelectedForUpload(uri: Uri) {
         viewModelScope.launch {
             try {
-                // 1. Resolve Android Content Uri to a physical file in cache directory
                 val tempFile = withContext(Dispatchers.IO) {
                     FileUtils.resolveUriToTempFile(application, uri)
                 }
                 
                 if (tempFile != null) {
-                    Log.d("HomeViewModel", "Uri resolved to: ${tempFile.absolutePath}")
-                    // 2. Trigger TDLib Upload matching our generic file document logic
                     fileRepository.uploadFile(tempFile.absolutePath, userId)
+                    _snackbarEvents.emit("Uploading \"${tempFile.name}\"...")
                 } else {
-                    Log.e("HomeViewModel", "Failed to resolve file Uri for upload")
-                    // Could optionally show a UI Error Toast here
+                    _snackbarEvents.emit("Could not read the selected file")
                 }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error processing file upload", e)
+                _snackbarEvents.emit("Upload failed")
             }
         }
     }

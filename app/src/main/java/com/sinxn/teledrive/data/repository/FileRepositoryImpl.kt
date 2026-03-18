@@ -31,6 +31,9 @@ class FileRepositoryImpl @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Track file IDs that we explicitly asked TDLib to download this session */
+    private val pendingDownloads = mutableSetOf<Int>()
+
     init {
         scope.launch {
             telegramClient.updates.collect { update ->
@@ -46,17 +49,22 @@ class FileRepositoryImpl @Inject constructor(
                             fileDao.updateUploadProgress(file.id.toString(), 1.0f)
                         }
 
-                        // Download logic - export immediately once internal TDLib cache finishes
-                        if (file.local.isDownloadingCompleted && file.local.path.isNotEmpty()) {
-                            val fileEntity = fileDao.getFileByFileId(file.id.toString())
-                            if (fileEntity != null) {
-                                val downloadedFile = java.io.File(file.local.path)
-                                com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
-                                    context, 
-                                    downloadedFile, 
-                                    fileEntity.name, 
-                                    fileEntity.mimeType ?: "application/octet-stream"
-                                )
+                        // Download logic - export only if we explicitly requested this download
+                        if (file.local.isDownloadingCompleted && file.local.path.isNotEmpty()
+                            && pendingDownloads.remove(file.id)) {
+                            try {
+                                val fileEntity = fileDao.getFileByFileId(file.id.toString())
+                                if (fileEntity != null) {
+                                    val downloadedFile = java.io.File(file.local.path)
+                                    com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
+                                        context, 
+                                        downloadedFile, 
+                                        fileEntity.name, 
+                                        fileEntity.mimeType ?: "application/octet-stream"
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                Log.e("FileRepositoryImpl", "Failed to export downloaded file", e)
                             }
                         }
                     }
@@ -202,10 +210,14 @@ class FileRepositoryImpl @Inject constructor(
         val fileIdStr = file.fileId ?: return
         val fileId = fileIdStr.toIntOrNull() ?: return
         
+        // Track this as an intentional download
+        pendingDownloads.add(fileId)
+        
         // Priority 32 (default), offset/limit 0 (entire file), synchronous false
         val downloadRequest = TdApi.DownloadFile(fileId, 32, 0, 0, false)
         telegramClient.sendAsync(downloadRequest) { result ->
              if (result is TdApi.Error) {
+                 pendingDownloads.remove(fileId)
                  Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
              } else {
                  Log.d("FileRepositoryImpl", "Download queued to TDLib!")
