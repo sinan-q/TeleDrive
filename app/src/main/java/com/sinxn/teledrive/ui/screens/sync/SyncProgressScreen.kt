@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,7 +77,7 @@ fun SyncProgressScreen(
                     is SyncStatus.Completed -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.checkCircle,
+                                imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "Sync Complete",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(64.dp)
@@ -147,6 +148,3 @@ fun SyncProgressScreen(
     }
 }
 
-// Temporary extension property for checkCircle until proper import is used
-val Icons.Filled.checkCircle: androidx.compose.ui.graphics.vector.ImageVector
-    get() = Icons.Default.checkCircle

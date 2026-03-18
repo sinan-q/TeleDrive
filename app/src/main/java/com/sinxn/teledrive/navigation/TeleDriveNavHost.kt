@@ -33,18 +33,30 @@ fun TeleDriveNavHost(
         composable<Route.Login> {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate(Route.StorageSelection) {
+                    navController.navigate(Route.StorageSelection()) {
                         popUpTo(Route.Login) { inclusive = true }
                     }
                 }
             )
         }
 
-        composable<Route.StorageSelection> {
+        composable<Route.StorageSelection> { backStackEntry ->
+            val route = backStackEntry.toRoute<Route.StorageSelection>()
             StorageSelectionScreen(
+                isFromSettings = route.isFromSettings,
                 onContinue = { isSyncMode ->
-                    navController.navigate(Route.MasterPassword(isSyncMode = isSyncMode)) {
-                        popUpTo(Route.StorageSelection) { inclusive = true }
+                    if (route.isFromSettings) {
+                        if (isSyncMode) {
+                            navController.navigate(Route.SyncProgress(isFromSettings = true)) {
+                                popUpTo<Route.StorageSelection> { inclusive = true }
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                    } else {
+                        navController.navigate(Route.MasterPassword(isSyncMode = isSyncMode)) {
+                            popUpTo<Route.StorageSelection> { inclusive = true }
+                        }
                     }
                 }
             )
@@ -57,7 +69,7 @@ fun TeleDriveNavHost(
                 onUnlocked = {
                     if (isFirstTimeSetup) {
                         if (masterPasswordRoute.isSyncMode) {
-                            navController.navigate(Route.SyncProgress) {
+                            navController.navigate(Route.SyncProgress(isFromSettings = false)) {
                                 popUpTo<Route.MasterPassword> { inclusive = true }
                             }
                         } else {
@@ -85,11 +97,16 @@ fun TeleDriveNavHost(
             )
         }
 
-        composable<Route.SyncProgress> {
+        composable<Route.SyncProgress> { backStackEntry ->
+            val route = backStackEntry.toRoute<Route.SyncProgress>()
             SyncProgressScreen(
                 onContinue = {
-                    navController.navigate(Route.SecurityPreferences) {
-                        popUpTo(Route.SyncProgress) { inclusive = true }
+                    if (route.isFromSettings) {
+                        navController.popBackStack()
+                    } else {
+                        navController.navigate(Route.SecurityPreferences) {
+                            popUpTo<Route.SyncProgress> { inclusive = true }
+                        }
                     }
                 }
             )
@@ -108,7 +125,10 @@ fun TeleDriveNavHost(
 
         composable<Route.Settings> {
             SettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToStorageSelection = {
+                    navController.navigate(Route.StorageSelection(isFromSettings = true))
+                }
             )
         }
 

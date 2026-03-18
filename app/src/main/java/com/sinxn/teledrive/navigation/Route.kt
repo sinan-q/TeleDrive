@@ -12,7 +12,7 @@ sealed interface Route {
     data object Login : Route
 
     @Serializable
-    data object StorageSelection : Route
+    data class StorageSelection(val isFromSettings: Boolean = false) : Route
 
     @Serializable
     data class MasterPassword(val isSyncMode: Boolean = false) : Route
@@ -27,7 +27,7 @@ sealed interface Route {
     data object Settings : Route
 
     @Serializable
-    data object SyncProgress : Route
+    data class SyncProgress(val isFromSettings: Boolean = false) : Route
 
     @Serializable
     data class FolderView(val folderId: String) : Route

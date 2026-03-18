@@ -20,6 +20,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StorageSelectionScreen(
+    isFromSettings: Boolean = false,
     onContinue: (isSyncMode: Boolean) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: StorageSelectionViewModel = hiltViewModel()
@@ -161,7 +162,11 @@ fun StorageSelectionScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "The master password you set on the next screen must be the same as the one used to encrypt the existing files.",
+                            text = if (isFromSettings) {
+                                "This will sync files from the new location. Ensure they were encrypted with your current master password."
+                            } else {
+                                "The master password you set on the next screen must be the same as the one used to encrypt the existing files."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
