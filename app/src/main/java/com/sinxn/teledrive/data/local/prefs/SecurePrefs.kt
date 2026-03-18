@@ -31,6 +31,15 @@ interface SecurePrefs {
 
     /** Clear the master password (used during logout / reset) */
     fun clearMasterPassword()
+
+    /** Store the plaintext master password for Biometric unlock */
+    fun setBiometricPassword(password: String)
+
+    /** Retrieve the plaintext master password for Biometric unlock */
+    fun getBiometricPassword(): String?
+
+    /** Clear the biometric password */
+    fun clearBiometricPassword()
 }
 
 /**
@@ -47,6 +56,7 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_USER_ID = "key_user_id"
         private const val KEY_MASTER_PW_HASH = "key_master_pw_hash"
         private const val KEY_MASTER_PW_SALT = "key_master_pw_salt"
+        private const val KEY_BIOMETRIC_PW = "key_biometric_pw"
     }
 
     private val masterKey = MasterKey.Builder(context)
@@ -104,6 +114,23 @@ class SecurePrefsImpl @Inject constructor(
         sharedPreferences.edit()
             .remove(KEY_MASTER_PW_HASH)
             .remove(KEY_MASTER_PW_SALT)
+            .remove(KEY_BIOMETRIC_PW)
+            .apply()
+    }
+
+    override fun setBiometricPassword(password: String) {
+        sharedPreferences.edit()
+            .putString(KEY_BIOMETRIC_PW, password)
+            .apply()
+    }
+
+    override fun getBiometricPassword(): String? {
+        return sharedPreferences.getString(KEY_BIOMETRIC_PW, null)
+    }
+
+    override fun clearBiometricPassword() {
+        sharedPreferences.edit()
+            .remove(KEY_BIOMETRIC_PW)
             .apply()
     }
 }

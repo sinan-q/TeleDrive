@@ -43,6 +43,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.ui.platform.LocalContext
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 
 @Composable
 fun MasterPasswordScreen(
@@ -66,6 +70,47 @@ fun MasterPasswordScreen(
                 viewModel.clearError()
             }
             else -> {}
+        }
+    }
+
+    val showBiometricPrompt by viewModel.showBiometricPrompt.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(showBiometricPrompt) {
+        if (showBiometricPrompt && !isSetupMode) {
+            val fragmentActivity = context as? FragmentActivity
+            if (fragmentActivity != null) {
+                val executor = ContextCompat.getMainExecutor(context)
+                val biometricPrompt = BiometricPrompt(
+                    fragmentActivity,
+                    executor,
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            super.onAuthenticationSucceeded(result)
+                            viewModel.unlockWithBiometric()
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            super.onAuthenticationError(errorCode, errString)
+                            viewModel.fallbackToPassword()
+                        }
+
+                        override fun onAuthenticationFailed() {
+                            super.onAuthenticationFailed()
+                        }
+                    }
+                )
+
+                val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                    .setTitle("Unlock TeleDrive")
+                    .setSubtitle("Authenticate to access your encrypted files")
+                    .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                    .build()
+
+                biometricPrompt.authenticate(promptInfo)
+            } else {
+                viewModel.fallbackToPassword()
+            }
         }
     }
 

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
+import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 
 sealed interface MasterPasswordUiState {
     /** Waiting for user input */
@@ -24,11 +25,15 @@ sealed interface MasterPasswordUiState {
 
 @HiltViewModel
 class MasterPasswordViewModel @Inject constructor(
-    private val encryptionManager: EncryptionManager
+    private val encryptionManager: EncryptionManager,
+    private val securePrefs: SecurePrefs
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<MasterPasswordUiState>(MasterPasswordUiState.Idle)
     val uiState: StateFlow<MasterPasswordUiState> = _uiState.asStateFlow()
+
+    private val _showBiometricPrompt = MutableStateFlow(securePrefs.getBiometricPassword() != null)
+    val showBiometricPrompt: StateFlow<Boolean> = _showBiometricPrompt.asStateFlow()
 
     /** True when this is the user's first time (setup mode), false when unlocking */
     val isSetupMode: Boolean get() = !encryptionManager.isPasswordSetUp()
@@ -49,6 +54,7 @@ class MasterPasswordViewModel @Inject constructor(
         _uiState.value = MasterPasswordUiState.Deriving
         try {
             encryptionManager.setupPassword(password)
+            securePrefs.setBiometricPassword(password)
             _uiState.value = MasterPasswordUiState.Unlocked
         } catch (e: Exception) {
             _uiState.value = MasterPasswordUiState.Error("Failed to set up encryption: ${e.message}")
@@ -68,6 +74,7 @@ class MasterPasswordViewModel @Inject constructor(
         try {
             val success = encryptionManager.unlockWithPassword(password)
             if (success) {
+                securePrefs.setBiometricPassword(password)
                 _uiState.value = MasterPasswordUiState.Unlocked
             } else {
                 _uiState.value = MasterPasswordUiState.Error("Incorrect password")
@@ -79,5 +86,18 @@ class MasterPasswordViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.value = MasterPasswordUiState.Idle
+    }
+
+    fun unlockWithBiometric() {
+        val password = securePrefs.getBiometricPassword()
+        if (password != null) {
+            unlockWithPassword(password)
+        } else {
+            fallbackToPassword()
+        }
+    }
+
+    fun fallbackToPassword() {
+        _showBiometricPrompt.value = false
     }
 }

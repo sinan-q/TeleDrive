@@ -92,6 +92,9 @@ dependencies {
 
     // Security (EncryptedSharedPreferences)
     implementation(libs.androidx.security.crypto)
+    
+    // Biometric Authentication
+    implementation(libs.androidx.biometric)
 
     // Testing
     testImplementation(libs.junit)
