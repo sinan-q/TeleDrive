@@ -49,6 +49,7 @@ fun FileItem(
     isGrid: Boolean,
     onClick: () -> Unit,
     onDownloadClick: () -> Unit,
+    onDeleteClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -128,6 +129,13 @@ fun FileItem(
                                 }
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            onClick = {
+                                showMenu = false
+                                onDeleteClick()
+                            }
+                        )
                     }
                 }
             } // End Box
@@ -195,6 +203,13 @@ fun FileItem(
                             }
                         )
                     }
+                    DropdownMenuItem(
+                        text = { Text("Delete") },
+                        onClick = {
+                            showMenu = false
+                            onDeleteClick()
+                        }
+                    )
                 }
             }
         }

@@ -16,6 +16,7 @@ fun FileGridView(
     files: List<FileEntity>,
     onFileClick: (FileEntity) -> Unit,
     onDownloadClick: (FileEntity) -> Unit,
+    onDeleteClick: (FileEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyVerticalGrid(
@@ -31,6 +32,7 @@ fun FileGridView(
                 isGrid = true,
                 onClick = { onFileClick(file) },
                 onDownloadClick = { onDownloadClick(file) },
+                onDeleteClick = { onDeleteClick(file) },
                 modifier = Modifier.animateItem()
             )
         }

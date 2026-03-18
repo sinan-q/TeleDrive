@@ -37,8 +37,8 @@ interface FileRepository {
     /** Update an existing file entity. */
     suspend fun updateFile(file: FileEntity)
 
-    /** Soft-delete a file (sets deletedAt timestamp). */
-    suspend fun deleteFile(id: String)
+    /** Delete a file: removes the TG message (if applicable) and hard-deletes from Room. */
+    suspend fun deleteFile(file: FileEntity)
 
     /** Search files by name. */
     fun searchFiles(query: String, userId: String): Flow<List<FileEntity>>

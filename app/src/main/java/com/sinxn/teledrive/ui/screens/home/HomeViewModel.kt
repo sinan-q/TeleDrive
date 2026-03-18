@@ -201,4 +201,15 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
+
+    fun deleteFile(file: FileEntity) {
+        viewModelScope.launch {
+            try {
+                fileRepository.deleteFile(file)
+                Log.d("HomeViewModel", "Deleted file: ${file.name}")
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error deleting file", e)
+            }
+        }
+    }
 }

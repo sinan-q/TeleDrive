@@ -133,6 +133,9 @@ fun HomeScreen(
                                     },
                                     onDownloadClick = { file ->
                                         viewModel.downloadFile(file)
+                                    },
+                                    onDeleteClick = { file ->
+                                        viewModel.deleteFile(file)
                                     }
                                 )
                             } else {
@@ -147,6 +150,9 @@ fun HomeScreen(
                                     },
                                     onDownloadClick = { file ->
                                         viewModel.downloadFile(file)
+                                    },
+                                    onDeleteClick = { file ->
+                                        viewModel.deleteFile(file)
                                     }
                                 )
                             }

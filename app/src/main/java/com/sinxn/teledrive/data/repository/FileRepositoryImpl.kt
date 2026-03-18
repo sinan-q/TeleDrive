@@ -129,8 +129,25 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun updateFile(file: FileEntity) =
         fileDao.updateFile(file)
 
-    override suspend fun deleteFile(id: String) =
-        fileDao.softDeleteFile(id)
+    override suspend fun deleteFile(file: FileEntity) {
+        // If file has a Telegram message, delete it from Saved Messages first
+        val msgId = file.messageId?.toLongOrNull()
+        if (msgId != null) {
+            try {
+                val chat = telegramClient.send(
+                    TdApi.CreatePrivateChat(file.userId.toLong(), true)
+                ) as TdApi.Chat
+                telegramClient.send(
+                    TdApi.DeleteMessages(chat.id, longArrayOf(msgId), true)
+                )
+                Log.d("FileRepositoryImpl", "Deleted TG message ${file.messageId}")
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Failed to delete TG message, proceeding with local delete", e)
+            }
+        }
+        // Hard-delete from Room regardless
+        fileDao.hardDeleteFile(file.id)
+    }
 
     override fun searchFiles(query: String, userId: String): Flow<List<FileEntity>> =
         fileDao.searchFiles(query, userId)
