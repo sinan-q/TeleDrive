@@ -15,6 +15,7 @@ import com.sinxn.teledrive.data.local.entity.FileEntity
 fun FileGridView(
     files: List<FileEntity>,
     onFileClick: (FileEntity) -> Unit,
+    onDownloadClick: (FileEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyVerticalGrid(
@@ -29,7 +30,7 @@ fun FileGridView(
                 file = file,
                 isGrid = true,
                 onClick = { onFileClick(file) },
-                onMoreClick = { /* TODO: Context menu */ },
+                onDownloadClick = { onDownloadClick(file) },
                 modifier = Modifier.animateItem()
             )
         }

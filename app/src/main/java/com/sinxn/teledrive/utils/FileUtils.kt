@@ -1,8 +1,12 @@
 package com.sinxn.teledrive.utils
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -43,6 +47,48 @@ object FileUtils {
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        }
+    }
+
+    /**
+     * Exports an internal file out to the public Android Downloads/TeleDrive folder.
+     */
+    fun exportToDownloads(context: Context, sourceFile: File, fileName: String, mimeType: String): Boolean {
+        if (!sourceFile.exists()) {
+            Log.e("FileUtils", "Source file does not exist: ${sourceFile.absolutePath}")
+            return false
+        }
+
+        val resolver = context.contentResolver
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, mimeType)
+            // Save in a dedicated TeleDrive subfolder inside public Downloads
+            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/TeleDrive")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            ?: return false
+
+        return try {
+            resolver.openOutputStream(uri)?.use { outputStream ->
+                sourceFile.inputStream().use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+
+            // Mark the file as successfully written and no longer pending
+            contentValues.clear()
+            contentValues.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, contentValues, null, null)
+            
+            Log.d("FileUtils", "Successfully exported file to Downloads/TeleDrive: $fileName")
+            true
+        } catch (e: Exception) {
+            Log.e("FileUtils", "Failed to export file to Downloads", e)
+            resolver.delete(uri, null, null)
+            false
         }
     }
 }

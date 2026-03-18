@@ -36,6 +36,9 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE message_id = :messageId AND deleted_at IS NULL LIMIT 1")
     suspend fun getFileByMessageId(messageId: String): FileEntity?
 
+    @Query("SELECT * FROM files WHERE file_id = :fileId AND deleted_at IS NULL LIMIT 1")
+    suspend fun getFileByFileId(fileId: String): FileEntity?
+
     /** Soft-delete a file by setting deleted_at timestamp */
     @Query("UPDATE files SET deleted_at = :timestamp WHERE id = :id")
     suspend fun softDeleteFile(id: String, timestamp: Long = System.currentTimeMillis())

@@ -1,10 +1,12 @@
 package com.sinxn.teledrive.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +24,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class FileRepositoryImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val fileDao: FileDao,
     private val telegramClient: TelegramClient
 ) : FileRepository {
@@ -34,11 +37,27 @@ class FileRepositoryImpl @Inject constructor(
                 when (update) {
                     is TdApi.UpdateFile -> {
                         val file = update.file
+                        
+                        // Upload logic
                         if (file.remote.isUploadingActive && file.expectedSize > 0) {
                             val progress = file.remote.uploadedSize.toFloat() / file.expectedSize.toFloat()
                             fileDao.updateUploadProgress(file.id.toString(), progress)
                         } else if (file.remote.isUploadingCompleted) {
                             fileDao.updateUploadProgress(file.id.toString(), 1.0f)
+                        }
+
+                        // Download logic - export immediately once internal TDLib cache finishes
+                        if (file.local.isDownloadingCompleted && file.local.path.isNotEmpty()) {
+                            val fileEntity = fileDao.getFileByFileId(file.id.toString())
+                            if (fileEntity != null) {
+                                val downloadedFile = java.io.File(file.local.path)
+                                com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
+                                    context, 
+                                    downloadedFile, 
+                                    fileEntity.name, 
+                                    fileEntity.mimeType ?: "application/octet-stream"
+                                )
+                            }
                         }
                     }
                     // We can also listen to UpdateNewMessage here in the future to auto-insert finished uploads
@@ -159,6 +178,21 @@ class FileRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             Log.e("FileRepositoryImpl", "Error initiating file upload", e)
             throw e
+        }
+    }
+
+    override suspend fun downloadFile(file: FileEntity) {
+        val fileIdStr = file.fileId ?: return
+        val fileId = fileIdStr.toIntOrNull() ?: return
+        
+        // Priority 32 (default), offset/limit 0 (entire file), synchronous false
+        val downloadRequest = TdApi.DownloadFile(fileId, 32, 0, 0, false)
+        telegramClient.sendAsync(downloadRequest) { result ->
+             if (result is TdApi.Error) {
+                 Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
+             } else {
+                 Log.d("FileRepositoryImpl", "Download queued to TDLib!")
+             }
         }
     }
 }

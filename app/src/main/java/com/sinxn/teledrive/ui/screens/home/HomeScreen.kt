@@ -130,6 +130,9 @@ fun HomeScreen(
                                         } else {
                                             // TODO: Open file viewer
                                         }
+                                    },
+                                    onDownloadClick = { file ->
+                                        viewModel.downloadFile(file)
                                     }
                                 )
                             } else {
@@ -141,6 +144,9 @@ fun HomeScreen(
                                         } else {
                                             // TODO: Open file viewer
                                         }
+                                    },
+                                    onDownloadClick = { file ->
+                                        viewModel.downloadFile(file)
                                     }
                                 )
                             }

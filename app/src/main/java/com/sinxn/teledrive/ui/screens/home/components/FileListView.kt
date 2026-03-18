@@ -14,6 +14,7 @@ import com.sinxn.teledrive.data.local.entity.FileEntity
 fun FileListView(
     files: List<FileEntity>,
     onFileClick: (FileEntity) -> Unit,
+    onDownloadClick: (FileEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -26,7 +27,7 @@ fun FileListView(
                 file = file,
                 isGrid = false,
                 onClick = { onFileClick(file) },
-                onMoreClick = { /* TODO: Context menu */ }
+                onDownloadClick = { onDownloadClick(file) }
             )
         }
     }

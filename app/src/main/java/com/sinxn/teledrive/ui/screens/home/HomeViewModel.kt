@@ -191,4 +191,14 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
+
+    fun downloadFile(file: FileEntity) {
+        viewModelScope.launch {
+            try {
+                fileRepository.downloadFile(file)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error initiating file download", e)
+            }
+        }
+    }
 }
