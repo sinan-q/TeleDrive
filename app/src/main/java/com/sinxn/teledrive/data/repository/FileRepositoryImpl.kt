@@ -70,15 +70,30 @@ class FileRepositoryImpl @Inject constructor(
                                 val fileEntity = fileDao.getFileByFileId(file.id.toString())
                                 if (fileEntity != null) {
                                     val downloadedFile = java.io.File(file.local.path)
-                                    com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
-                                        context, 
-                                        downloadedFile, 
-                                        fileEntity.name, 
-                                        fileEntity.mimeType ?: "application/octet-stream"
-                                    )
+                                    val exportName = fileEntity.name
+                                    val exportMimeType = fileEntity.mimeType ?: "application/octet-stream"
+
+                                    // Check if the TDLib file is encrypted
+                                    if (downloadedFile.name.endsWith(".enc")) {
+                                        // Decrypt to a temp file, then export the plaintext
+                                        val decryptedFile = java.io.File(context.cacheDir, "dec_$exportName")
+                                        try {
+                                            fileCryptor.decryptFile(downloadedFile, decryptedFile)
+                                            com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
+                                                context, decryptedFile, exportName, exportMimeType
+                                            )
+                                        } finally {
+                                            decryptedFile.delete() // Always clean up temp decrypted file
+                                        }
+                                    } else {
+                                        // Legacy unencrypted file — export directly
+                                        com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
+                                            context, downloadedFile, exportName, exportMimeType
+                                        )
+                                    }
                                 }
                             } catch (e: Exception) {
-                                Log.e("FileRepositoryImpl", "Failed to export downloaded file", e)
+                                Log.e("FileRepositoryImpl", "Failed to export/decrypt downloaded file", e)
                             }
                         }
                     }
