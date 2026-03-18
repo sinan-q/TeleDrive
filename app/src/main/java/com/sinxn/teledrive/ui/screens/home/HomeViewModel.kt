@@ -212,4 +212,38 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
+
+    fun renameFile(id: String, newName: String) {
+        viewModelScope.launch {
+            try {
+                fileRepository.renameFile(id, newName)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error renaming file", e)
+            }
+        }
+    }
+
+    private val _folders = MutableStateFlow<List<FileEntity>>(emptyList())
+    val folders: StateFlow<List<FileEntity>> = _folders.asStateFlow()
+
+    fun loadFolders() {
+        if (userId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                _folders.value = fileRepository.getFolders(userId)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error loading folders", e)
+            }
+        }
+    }
+
+    fun moveFile(id: String, newParentId: String?) {
+        viewModelScope.launch {
+            try {
+                fileRepository.moveFile(id, newParentId)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error moving file", e)
+            }
+        }
+    }
 }

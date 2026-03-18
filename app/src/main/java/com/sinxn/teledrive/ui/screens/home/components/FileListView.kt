@@ -16,6 +16,8 @@ fun FileListView(
     onFileClick: (FileEntity) -> Unit,
     onDownloadClick: (FileEntity) -> Unit,
     onDeleteClick: (FileEntity) -> Unit,
+    onRenameClick: (FileEntity) -> Unit,
+    onMoveClick: (FileEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -29,7 +31,9 @@ fun FileListView(
                 isGrid = false,
                 onClick = { onFileClick(file) },
                 onDownloadClick = { onDownloadClick(file) },
-                onDeleteClick = { onDeleteClick(file) }
+                onDeleteClick = { onDeleteClick(file) },
+                onRenameClick = { onRenameClick(file) },
+                onMoveClick = { onMoveClick(file) }
             )
         }
     }

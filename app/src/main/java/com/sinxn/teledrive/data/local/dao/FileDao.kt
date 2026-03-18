@@ -51,6 +51,18 @@ interface FileDao {
     @Query("UPDATE files SET upload_progress = :progress WHERE file_id = :fileId")
     suspend fun updateUploadProgress(fileId: String, progress: Float)
 
+    /** Rename a file or folder */
+    @Query("UPDATE files SET name = :newName, updated_at = :timestamp WHERE id = :id")
+    suspend fun renameFile(id: String, newName: String, timestamp: Long = System.currentTimeMillis())
+
+    /** Move a file or folder to a different parent */
+    @Query("UPDATE files SET parent_id = :newParentId, updated_at = :timestamp WHERE id = :id")
+    suspend fun moveFile(id: String, newParentId: String?, timestamp: Long = System.currentTimeMillis())
+
+    /** Get all folders for a user (for move-to picker) */
+    @Query("SELECT * FROM files WHERE type = 'folder' AND deleted_at IS NULL AND user_id = :userId ORDER BY name ASC")
+    suspend fun getFoldersByUser(userId: String): List<FileEntity>
+
     /** Search files by name (case-insensitive) */
     @Query("""
         SELECT * FROM files 

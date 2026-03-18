@@ -13,10 +13,13 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
+import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.ui.screens.home.components.BreadcrumbsBar
 import com.sinxn.teledrive.ui.screens.home.components.CreateFolderDialog
 import com.sinxn.teledrive.ui.screens.home.components.FileListView
 import com.sinxn.teledrive.ui.screens.home.components.FileGridView
+import com.sinxn.teledrive.ui.screens.home.components.MoveToFolderDialog
+import com.sinxn.teledrive.ui.screens.home.components.RenameDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -55,6 +58,9 @@ fun HomeScreen(
     }
 
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var fileToRename by remember { mutableStateOf<FileEntity?>(null) }
+    var fileToMove by remember { mutableStateOf<FileEntity?>(null) }
+    val folders by viewModel.folders.collectAsState()
 
     // Launcher for Android System File Picker
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -136,6 +142,13 @@ fun HomeScreen(
                                     },
                                     onDeleteClick = { file ->
                                         viewModel.deleteFile(file)
+                                    },
+                                    onRenameClick = { file ->
+                                        fileToRename = file
+                                    },
+                                    onMoveClick = { file ->
+                                        viewModel.loadFolders()
+                                        fileToMove = file
                                     }
                                 )
                             } else {
@@ -153,6 +166,13 @@ fun HomeScreen(
                                     },
                                     onDeleteClick = { file ->
                                         viewModel.deleteFile(file)
+                                    },
+                                    onRenameClick = { file ->
+                                        fileToRename = file
+                                    },
+                                    onMoveClick = { file ->
+                                        viewModel.loadFolders()
+                                        fileToMove = file
                                     }
                                 )
                             }
@@ -168,6 +188,27 @@ fun HomeScreen(
             onDismissRequest = { showCreateFolderDialog = false },
             onCreateFolder = { folderName ->
                 viewModel.createFolder(folderName)
+            }
+        )
+    }
+
+    fileToRename?.let { file ->
+        RenameDialog(
+            currentName = file.name,
+            onDismissRequest = { fileToRename = null },
+            onRename = { newName ->
+                viewModel.renameFile(file.id, newName)
+            }
+        )
+    }
+
+    fileToMove?.let { file ->
+        MoveToFolderDialog(
+            folders = folders.filter { it.id != file.id },
+            currentParentId = file.parentId,
+            onDismissRequest = { fileToMove = null },
+            onMoveToFolder = { newParentId ->
+                viewModel.moveFile(file.id, newParentId)
             }
         )
     }

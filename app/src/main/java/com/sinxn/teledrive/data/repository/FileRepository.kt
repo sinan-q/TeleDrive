@@ -56,4 +56,13 @@ interface FileRepository {
      * Export handled via event listening.
      */
     suspend fun downloadFile(file: FileEntity)
+
+    /** Rename a file or folder (virtual metadata only). */
+    suspend fun renameFile(id: String, newName: String)
+
+    /** Move a file or folder to a different parent folder. */
+    suspend fun moveFile(id: String, newParentId: String?)
+
+    /** Get all available folders for the move-to picker. */
+    suspend fun getFolders(userId: String): List<FileEntity>
 }

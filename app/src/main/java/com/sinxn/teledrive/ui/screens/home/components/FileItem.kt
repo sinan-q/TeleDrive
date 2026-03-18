@@ -50,6 +50,8 @@ fun FileItem(
     onClick: () -> Unit,
     onDownloadClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    onRenameClick: () -> Unit,
+    onMoveClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -130,6 +132,20 @@ fun FileItem(
                             )
                         }
                         DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                showMenu = false
+                                onRenameClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Move to...") },
+                            onClick = {
+                                showMenu = false
+                                onMoveClick()
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Delete") },
                             onClick = {
                                 showMenu = false
@@ -203,6 +219,20 @@ fun FileItem(
                             }
                         )
                     }
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        onClick = {
+                            showMenu = false
+                            onRenameClick()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Move to...") },
+                        onClick = {
+                            showMenu = false
+                            onMoveClick()
+                        }
+                    )
                     DropdownMenuItem(
                         text = { Text("Delete") },
                         onClick = {

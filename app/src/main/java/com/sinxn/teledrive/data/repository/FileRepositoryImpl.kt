@@ -212,4 +212,13 @@ class FileRepositoryImpl @Inject constructor(
              }
         }
     }
+
+    override suspend fun renameFile(id: String, newName: String) =
+        fileDao.renameFile(id, newName)
+
+    override suspend fun moveFile(id: String, newParentId: String?) =
+        fileDao.moveFile(id, newParentId)
+
+    override suspend fun getFolders(userId: String): List<FileEntity> =
+        fileDao.getFoldersByUser(userId)
 }
