@@ -93,5 +93,9 @@ data class FileEntity(
 
     /** Soft-delete timestamp (null = not deleted) */
     @ColumnInfo(name = "deleted_at")
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+
+    /** The Telegram Chat ID where this file is stored */
+    @ColumnInfo(name = "chat_id")
+    val chatId: Long? = null
 )

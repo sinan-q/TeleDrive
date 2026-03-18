@@ -207,15 +207,21 @@ class FileRepositoryImpl @Inject constructor(
         val msgId = file.messageId?.toLongOrNull()
         if (msgId != null) {
             try {
-                val configuredChatId = securePrefs.getStorageChannelId()
-                val targetChatId = if (configuredChatId != null) {
-                    configuredChatId
+                // Use the chatId stored with the file, OR fall back to current storage config
+                val targetChatId = if (file.chatId != null && file.chatId != 0L) {
+                    file.chatId
                 } else {
-                    val chat = telegramClient.send(
-                        TdApi.CreatePrivateChat(file.userId.toLong(), true)
-                    ) as TdApi.Chat
-                    chat.id
+                    val configuredChatId = securePrefs.getStorageChannelId()
+                    if (configuredChatId != null) {
+                        configuredChatId
+                    } else {
+                        val chat = telegramClient.send(
+                            TdApi.CreatePrivateChat(file.userId.toLong(), true)
+                        ) as TdApi.Chat
+                        chat.id
+                    }
                 }
+                
                 telegramClient.send(
                     TdApi.DeleteMessages(targetChatId, longArrayOf(msgId), true)
                 )

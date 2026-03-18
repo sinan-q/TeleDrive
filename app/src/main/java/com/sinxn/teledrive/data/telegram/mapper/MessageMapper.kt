@@ -60,7 +60,8 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
                 userId = userId,
                 uploadedAt = createdAtMs,
                 createdAt = createdAtMs,
-                updatedAt = createdAtMs
+                updatedAt = createdAtMs,
+                chatId = this.chatId
             )
         }
         // Ignore all other content types as TeleDrive uploads everything as encrypted documents
