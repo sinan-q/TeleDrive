@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,7 +27,8 @@ import javax.inject.Singleton
 class FileRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val fileDao: FileDao,
-    private val telegramClient: TelegramClient
+    private val telegramClient: TelegramClient,
+    private val securePrefs: SecurePrefs
 ) : FileRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -68,7 +70,17 @@ class FileRepositoryImpl @Inject constructor(
                             }
                         }
                     }
-                    // We can also listen to UpdateNewMessage here in the future to auto-insert finished uploads
+                    is TdApi.UpdateNewMessage -> {
+                        val activeUserId = securePrefs.getUserId()
+                        if (activeUserId != null) {
+                            val entity = update.message.toFileEntity(activeUserId)
+                            if (entity != null) {
+                                // Auto-insert new finished uploads or remote syncs into Room directly.
+                                // Room's IGNORE strategy ensures we don't clobber existing ones.
+                                fileDao.insertFile(entity)
+                            }
+                        }
+                    }
                 }
             }
         }

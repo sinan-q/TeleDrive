@@ -5,8 +5,10 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import com.sinxn.teledrive.data.local.entity.UserEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.FileRepository
+import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
@@ -39,6 +41,7 @@ sealed class HomeUiState {
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val fileRepository: FileRepository,
+    private val userRepository: UserRepository,
     private val telegramClient: TelegramClient,
     private val securePrefs: SecurePrefs,
     private val authManager: AuthManager,
@@ -57,6 +60,34 @@ class HomeViewModel @Inject constructor(
     private val currentFolder = MutableStateFlow<FileEntity?>(null)
     private var observeJob: Job? = null
     private var userId: String = ""
+
+    fun onFileSelectedForUpload(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                // Read from prefs if userId is not populated yet
+                val activeUserId = userId.takeIf { it.isNotBlank() } ?: securePrefs.getUserId()
+                if (activeUserId.isNullOrBlank()) {
+                    _snackbarEvents.emit("User ID not loaded. Please try again.")
+                    return@launch
+                }
+
+                val tempFile = withContext(Dispatchers.IO) {
+                    FileUtils.resolveUriToTempFile(application, uri)
+                }
+                
+                if (tempFile != null) {
+                    // Start upload; the new FileRepository update listener will catch it when TDLib finishes
+                    fileRepository.uploadFile(tempFile.absolutePath, activeUserId)
+                    _snackbarEvents.emit("Uploading \"${tempFile.name}\"...")
+                } else {
+                    _snackbarEvents.emit("Could not read the selected file")
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error processing file upload", e)
+                _snackbarEvents.emit("Upload failed")
+            }
+        }
+    }
 
     /** One-shot events for Snackbar messages */
     private val _snackbarEvents = MutableSharedFlow<String>()
@@ -96,6 +127,17 @@ class HomeViewModel @Inject constructor(
 
                 val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
                 val fetchedUserId = me.id.toString()
+                
+                // Save the authenticated user to the local database to satisfy FileEntity FOREIGN KEY constraints
+                userRepository.saveUser(
+                    UserEntity(
+                        id = fetchedUserId,
+                        tgId = fetchedUserId,
+                        username = "", // Using empty safely
+                        name = "${me.firstName} ${me.lastName}".trim(),
+                        phone = me.phoneNumber
+                    )
+                )
                 
                 // If it's a new login or previous cache was empty, save it and start observing
                 if (fetchedUserId != userId) {
@@ -205,25 +247,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun onFileSelectedForUpload(uri: Uri) {
-        viewModelScope.launch {
-            try {
-                val tempFile = withContext(Dispatchers.IO) {
-                    FileUtils.resolveUriToTempFile(application, uri)
-                }
-                
-                if (tempFile != null) {
-                    fileRepository.uploadFile(tempFile.absolutePath, userId)
-                    _snackbarEvents.emit("Uploading \"${tempFile.name}\"...")
-                } else {
-                    _snackbarEvents.emit("Could not read the selected file")
-                }
-            } catch (e: Exception) {
-                Log.e("HomeViewModel", "Error processing file upload", e)
-                _snackbarEvents.emit("Upload failed")
-            }
-        }
-    }
+
 
     fun downloadFile(file: FileEntity) {
         viewModelScope.launch {
