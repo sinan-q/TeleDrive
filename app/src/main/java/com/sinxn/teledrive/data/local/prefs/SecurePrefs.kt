@@ -40,6 +40,18 @@ interface SecurePrefs {
 
     /** Clear the biometric password */
     fun clearBiometricPassword()
+
+    /** Store the preferred storage channel ID (null means default/Saved Messages) */
+    fun setStorageChannelId(chatId: Long?)
+
+    /** Get the preferred storage channel ID */
+    fun getStorageChannelId(): Long?
+
+    /** Store the preferred storage channel Name */
+    fun setStorageChannelName(name: String?)
+
+    /** Get the preferred storage channel Name */
+    fun getStorageChannelName(): String?
 }
 
 /**
@@ -57,6 +69,8 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_MASTER_PW_HASH = "key_master_pw_hash"
         private const val KEY_MASTER_PW_SALT = "key_master_pw_salt"
         private const val KEY_BIOMETRIC_PW = "key_biometric_pw"
+        private const val KEY_STORAGE_CHANNEL_ID = "key_storage_channel_id"
+        private const val KEY_STORAGE_CHANNEL_NAME = "key_storage_channel_name"
     }
 
     private val masterKey = MasterKey.Builder(context)
@@ -132,5 +146,37 @@ class SecurePrefsImpl @Inject constructor(
         sharedPreferences.edit()
             .remove(KEY_BIOMETRIC_PW)
             .apply()
+    }
+
+    override fun setStorageChannelId(chatId: Long?) {
+        val editor = sharedPreferences.edit()
+        if (chatId != null) {
+            editor.putLong(KEY_STORAGE_CHANNEL_ID, chatId)
+        } else {
+            editor.remove(KEY_STORAGE_CHANNEL_ID)
+        }
+        editor.apply()
+    }
+
+    override fun getStorageChannelId(): Long? {
+        return if (sharedPreferences.contains(KEY_STORAGE_CHANNEL_ID)) {
+            sharedPreferences.getLong(KEY_STORAGE_CHANNEL_ID, 0L)
+        } else {
+            null
+        }
+    }
+
+    override fun setStorageChannelName(name: String?) {
+        val editor = sharedPreferences.edit()
+        if (name != null) {
+            editor.putString(KEY_STORAGE_CHANNEL_NAME, name)
+        } else {
+            editor.remove(KEY_STORAGE_CHANNEL_NAME)
+        }
+        editor.apply()
+    }
+
+    override fun getStorageChannelName(): String? {
+        return sharedPreferences.getString(KEY_STORAGE_CHANNEL_NAME, null)
     }
 }

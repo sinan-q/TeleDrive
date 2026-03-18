@@ -100,8 +100,19 @@ class FileRepositoryImpl @Inject constructor(
                     is TdApi.UpdateNewMessage -> {
                         val activeUserId = securePrefs.getUserId()
                         if (activeUserId != null) {
-                            val entity = update.message.toFileEntity(activeUserId)
-                            if (entity != null) {
+                            val configuredChatId = securePrefs.getStorageChannelId()
+                            val targetChatId = if (configuredChatId != null) {
+                                configuredChatId
+                            } else {
+                                val chat = telegramClient.send(
+                                    TdApi.CreatePrivateChat(activeUserId.toLong(), true)
+                                ) as TdApi.Chat
+                                chat.id
+                            }
+                            
+                            if (update.message.chatId == targetChatId) {
+                                val entity = update.message.toFileEntity(activeUserId)
+                                if (entity != null) {
                                 // Strip .enc extension and restore original metadata if this was our upload
                                 val meta = pendingUploadMeta.remove(entity.localName())
                                 val cleanEntity = if (meta != null) {
@@ -118,6 +129,7 @@ class FileRepositoryImpl @Inject constructor(
                                 } else cleanEntity
 
                                 fileDao.insertFile(entityToInsert)
+                            }
                             }
                         }
                     }
@@ -195,11 +207,17 @@ class FileRepositoryImpl @Inject constructor(
         val msgId = file.messageId?.toLongOrNull()
         if (msgId != null) {
             try {
-                val chat = telegramClient.send(
-                    TdApi.CreatePrivateChat(file.userId.toLong(), true)
-                ) as TdApi.Chat
+                val configuredChatId = securePrefs.getStorageChannelId()
+                val targetChatId = if (configuredChatId != null) {
+                    configuredChatId
+                } else {
+                    val chat = telegramClient.send(
+                        TdApi.CreatePrivateChat(file.userId.toLong(), true)
+                    ) as TdApi.Chat
+                    chat.id
+                }
                 telegramClient.send(
-                    TdApi.DeleteMessages(chat.id, longArrayOf(msgId), true)
+                    TdApi.DeleteMessages(targetChatId, longArrayOf(msgId), true)
                 )
                 Log.d("FileRepositoryImpl", "Deleted TG message ${file.messageId}")
             } catch (e: Exception) {
@@ -236,11 +254,16 @@ class FileRepositoryImpl @Inject constructor(
                 .getMimeTypeFromExtension(originalFile.extension)
             pendingUploadMeta[encFile.name] = UploadMeta(originalName, mimeType)
 
-            // Get our own ID to figure out the private chat ID (Saved Messages)
-            val chat = telegramClient.send(
-                TdApi.CreatePrivateChat(userId.toLong(), true)
-            ) as TdApi.Chat
-            val savedMessagesChatId = chat.id
+            // Get the target chat ID (configured channel or Saved Messages)
+            val configuredChatId = securePrefs.getStorageChannelId()
+            val savedMessagesChatId = if (configuredChatId != null) {
+                configuredChatId
+            } else {
+                val chat = telegramClient.send(
+                    TdApi.CreatePrivateChat(userId.toLong(), true)
+                ) as TdApi.Chat
+                chat.id
+            }
 
             // Create InputFileLocal pointing to the ENCRYPTED file
             val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
