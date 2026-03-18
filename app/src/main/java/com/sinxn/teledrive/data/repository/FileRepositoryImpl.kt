@@ -13,8 +13,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import com.sinxn.teledrive.data.model.SyncStatus
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,6 +44,9 @@ class FileRepositoryImpl @Inject constructor(
 
     /** Maps a pending upload's raw file name back to its target folder's parentId */
     private val pendingUploadParents = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
+    override val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
     /**
      * Maps an encrypted TG filename (e.g. "report.pdf.enc") back to its original metadata
@@ -335,6 +342,52 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun getFolders(userId: String): List<FileEntity> =
         fileDao.getFoldersByUser(userId)
+
+    override suspend fun syncExistingFiles(userId: String) {
+        try {
+            _syncStatus.value = SyncStatus.Syncing(0)
+            
+            val configuredChatId = securePrefs.getStorageChannelId()
+            val targetChatId = if (configuredChatId != null) {
+                configuredChatId
+            } else {
+                val chat = telegramClient.send(
+                    TdApi.CreatePrivateChat(userId.toLong(), true)
+                ) as TdApi.Chat
+                chat.id
+            }
+
+            Log.d("FileRepositoryImpl", "Starting existing files sync for chat $targetChatId")
+            
+            var lastMsgId = 0L
+            var totalSynced = 0
+            
+            // Loop to fetch history in batches of 100
+            while (true) {
+                val result = telegramClient.send(
+                    TdApi.GetChatHistory(targetChatId, lastMsgId, 0, 100, false)
+                ) as TdApi.Messages
+                
+                if (result.messages.isEmpty()) break
+                
+                val entitiesToInsert = result.messages.mapNotNull { it.toFileEntity(userId) }
+                if (entitiesToInsert.isNotEmpty()) {
+                    fileDao.insertFiles(entitiesToInsert)
+                    totalSynced += entitiesToInsert.size
+                    _syncStatus.value = SyncStatus.Syncing(totalSynced)
+                }
+                
+                lastMsgId = result.messages.last().id
+                if (result.messages.size < 100) break
+            }
+            
+            Log.d("FileRepositoryImpl", "Sync completed. Total files found and added: $totalSynced")
+            _syncStatus.value = SyncStatus.Completed
+        } catch (e: Exception) {
+            Log.e("FileRepositoryImpl", "Error syncing existing files", e)
+            _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during sync")
+        }
+    }
 
     // ── Helper Extensions ──────────────────────────────────────────
 

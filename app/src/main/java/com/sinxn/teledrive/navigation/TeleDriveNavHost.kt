@@ -15,6 +15,7 @@ import com.sinxn.teledrive.ui.screens.settings.SettingsScreen
 import com.sinxn.teledrive.ui.screens.folder.FolderViewScreen
 import com.sinxn.teledrive.ui.screens.storageselection.StorageSelectionScreen
 import com.sinxn.teledrive.ui.screens.securitypreferences.SecurityPreferencesScreen
+import com.sinxn.teledrive.ui.screens.sync.SyncProgressScreen
 
 @Composable
 fun TeleDriveNavHost(
@@ -55,8 +56,14 @@ fun TeleDriveNavHost(
                 isSyncMode = masterPasswordRoute.isSyncMode,
                 onUnlocked = {
                     if (isFirstTimeSetup) {
-                        navController.navigate(Route.SecurityPreferences) {
-                            popUpTo<Route.MasterPassword> { inclusive = true }
+                        if (masterPasswordRoute.isSyncMode) {
+                            navController.navigate(Route.SyncProgress) {
+                                popUpTo<Route.MasterPassword> { inclusive = true }
+                            }
+                        } else {
+                            navController.navigate(Route.SecurityPreferences) {
+                                popUpTo<Route.MasterPassword> { inclusive = true }
+                            }
                         }
                     } else {
                         navController.navigate(Route.Home) {
@@ -73,6 +80,16 @@ fun TeleDriveNavHost(
                 onContinue = {
                     navController.navigate(Route.Home) {
                         popUpTo(Route.SecurityPreferences) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable<Route.SyncProgress> {
+            SyncProgressScreen(
+                onContinue = {
+                    navController.navigate(Route.SecurityPreferences) {
+                        popUpTo(Route.SyncProgress) { inclusive = true }
                     }
                 }
             )

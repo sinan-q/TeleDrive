@@ -27,5 +27,8 @@ sealed interface Route {
     data object Settings : Route
 
     @Serializable
+    data object SyncProgress : Route
+
+    @Serializable
     data class FolderView(val folderId: String) : Route
 }

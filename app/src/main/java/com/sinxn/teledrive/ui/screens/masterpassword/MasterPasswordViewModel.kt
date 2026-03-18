@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import androidx.lifecycle.SavedStateHandle
+import com.sinxn.teledrive.data.repository.FileRepository
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 
 sealed interface MasterPasswordUiState {
     /** Waiting for user input */
@@ -28,6 +31,7 @@ sealed interface MasterPasswordUiState {
 class MasterPasswordViewModel @Inject constructor(
     private val encryptionManager: EncryptionManager,
     private val securePrefs: SecurePrefs,
+    private val fileRepository: FileRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 

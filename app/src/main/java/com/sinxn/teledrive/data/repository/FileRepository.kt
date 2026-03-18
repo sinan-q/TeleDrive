@@ -1,7 +1,9 @@
 package com.sinxn.teledrive.data.repository
 
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import com.sinxn.teledrive.data.model.SyncStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Repository interface for file/folder data operations.
@@ -55,4 +57,15 @@ interface FileRepository {
 
     /** Get all available folders for the move-to picker. */
     suspend fun getFolders(userId: String): List<FileEntity>
+
+    /**
+     * Scans the Telegram chat history for existing encrypted (.enc) files
+     * and adds them to the local database.
+     */
+    suspend fun syncExistingFiles(userId: String)
+
+    /**
+     * Observable flow of the current sync status.
+     */
+    val syncStatus: StateFlow<SyncStatus>
 }
