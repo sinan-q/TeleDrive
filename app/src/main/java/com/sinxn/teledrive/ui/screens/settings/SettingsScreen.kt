@@ -6,7 +6,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +25,8 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val selectedChannelName by viewModel.selectedChannelName.collectAsState()
+    val authOnLaunch by viewModel.authOnLaunch.collectAsState()
+    val biometricUnlock by viewModel.biometricUnlock.collectAsState()
     var showChannelPicker by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -53,6 +57,38 @@ fun SettingsScreen(
                     viewModel.loadChats("")
                 }
             )
+
+            HorizontalDivider()
+
+            ListItem(
+                headlineContent = { Text("Require authentication on launch") },
+                supportingContent = { Text("Ask for password or biometric on every app launch") },
+                leadingContent = {
+                    Icon(Icons.Default.Security, contentDescription = null)
+                },
+                trailingContent = {
+                    Switch(
+                        checked = authOnLaunch,
+                        onCheckedChange = { viewModel.setAuthOnLaunch(it) }
+                    )
+                }
+            )
+
+            if (authOnLaunch) {
+                ListItem(
+                    headlineContent = { Text("Unlock with face or fingerprint") },
+                    supportingContent = { Text("Use device biometrics instead of typing password") },
+                    leadingContent = {
+                        Icon(Icons.Default.Fingerprint, contentDescription = null)
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = biometricUnlock,
+                            onCheckedChange = { viewModel.setBiometricUnlock(it) }
+                        )
+                    }
+                )
+            }
         }
 
         if (showChannelPicker) {

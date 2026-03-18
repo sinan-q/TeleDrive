@@ -32,7 +32,9 @@ class MasterPasswordViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<MasterPasswordUiState>(MasterPasswordUiState.Idle)
     val uiState: StateFlow<MasterPasswordUiState> = _uiState.asStateFlow()
 
-    private val _showBiometricPrompt = MutableStateFlow(securePrefs.getBiometricPassword() != null)
+    private val _showBiometricPrompt = MutableStateFlow(
+        securePrefs.getBiometricPassword() != null && securePrefs.isBiometricUnlockEnabled()
+    )
     val showBiometricPrompt: StateFlow<Boolean> = _showBiometricPrompt.asStateFlow()
 
     /** True when this is the user's first time (setup mode), false when unlocking */

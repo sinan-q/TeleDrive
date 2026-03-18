@@ -148,7 +148,7 @@ fun MasterPasswordScreen(
             // Subtitle
             Text(
                 text = if (isSetupMode) {
-                    "Create a master password to encrypt your files.\nThis password is never stored — only its hash."
+                    "Create a master password to encrypt your files."
                 } else {
                     "Enter your master password to unlock your vault."
                 },
@@ -247,7 +247,7 @@ fun MasterPasswordScreen(
                         if (isSetupMode) {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "⚠️ If you forget this password, your encrypted files cannot be recovered.",
+                                text = "⚠️ If you forget this password and lose access to this app/device (e.g., after a reset), your encrypted files cannot be recovered.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                                 textAlign = TextAlign.Center

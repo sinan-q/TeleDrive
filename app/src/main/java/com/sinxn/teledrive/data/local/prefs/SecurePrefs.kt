@@ -52,6 +52,14 @@ interface SecurePrefs {
 
     /** Get the preferred storage channel Name */
     fun getStorageChannelName(): String?
+
+    /** Whether to require authentication (password or biometric) on app launch */
+    fun isAuthOnLaunchEnabled(): Boolean
+    fun setAuthOnLaunch(enabled: Boolean)
+
+    /** Whether to use system biometric/device credential for unlock */
+    fun isBiometricUnlockEnabled(): Boolean
+    fun setBiometricUnlock(enabled: Boolean)
 }
 
 /**
@@ -71,6 +79,8 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_BIOMETRIC_PW = "key_biometric_pw"
         private const val KEY_STORAGE_CHANNEL_ID = "key_storage_channel_id"
         private const val KEY_STORAGE_CHANNEL_NAME = "key_storage_channel_name"
+        private const val KEY_AUTH_ON_LAUNCH = "key_auth_on_launch"
+        private const val KEY_BIOMETRIC_UNLOCK = "key_biometric_unlock"
     }
 
     private val masterKey = MasterKey.Builder(context)
@@ -178,5 +188,25 @@ class SecurePrefsImpl @Inject constructor(
 
     override fun getStorageChannelName(): String? {
         return sharedPreferences.getString(KEY_STORAGE_CHANNEL_NAME, null)
+    }
+
+    override fun isAuthOnLaunchEnabled(): Boolean {
+        return sharedPreferences.getBoolean(KEY_AUTH_ON_LAUNCH, false)
+    }
+
+    override fun setAuthOnLaunch(enabled: Boolean) {
+        sharedPreferences.edit()
+            .putBoolean(KEY_AUTH_ON_LAUNCH, enabled)
+            .apply()
+    }
+
+    override fun isBiometricUnlockEnabled(): Boolean {
+        return sharedPreferences.getBoolean(KEY_BIOMETRIC_UNLOCK, false)
+    }
+
+    override fun setBiometricUnlock(enabled: Boolean) {
+        sharedPreferences.edit()
+            .putBoolean(KEY_BIOMETRIC_UNLOCK, enabled)
+            .apply()
     }
 }

@@ -35,6 +35,12 @@ class SettingsViewModel @Inject constructor(
     private val _isSearchLoading = MutableStateFlow(false)
     val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
 
+    private val _authOnLaunch = MutableStateFlow(securePrefs.isAuthOnLaunchEnabled())
+    val authOnLaunch: StateFlow<Boolean> = _authOnLaunch.asStateFlow()
+
+    private val _biometricUnlock = MutableStateFlow(securePrefs.isBiometricUnlockEnabled())
+    val biometricUnlock: StateFlow<Boolean> = _biometricUnlock.asStateFlow()
+
     fun loadChats(query: String = "") {
         viewModelScope.launch {
             _isSearchLoading.value = true
@@ -86,5 +92,19 @@ class SettingsViewModel @Inject constructor(
             securePrefs.setStorageChannelName(title)
             _selectedChannelName.value = title
         }
+    }
+
+    fun setAuthOnLaunch(enabled: Boolean) {
+        securePrefs.setAuthOnLaunch(enabled)
+        _authOnLaunch.value = enabled
+        if (!enabled) {
+            securePrefs.setBiometricUnlock(false)
+            _biometricUnlock.value = false
+        }
+    }
+
+    fun setBiometricUnlock(enabled: Boolean) {
+        securePrefs.setBiometricUnlock(enabled)
+        _biometricUnlock.value = enabled
     }
 }

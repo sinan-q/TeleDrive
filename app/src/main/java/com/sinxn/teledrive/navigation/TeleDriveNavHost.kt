@@ -6,16 +6,20 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
+import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.ui.screens.home.HomeScreen
 import com.sinxn.teledrive.ui.screens.login.LoginScreen
 import com.sinxn.teledrive.ui.screens.masterpassword.MasterPasswordScreen
 import com.sinxn.teledrive.ui.screens.settings.SettingsScreen
 import com.sinxn.teledrive.ui.screens.folder.FolderViewScreen
 import com.sinxn.teledrive.ui.screens.storageselection.StorageSelectionScreen
+import com.sinxn.teledrive.ui.screens.securitypreferences.SecurityPreferencesScreen
 
 @Composable
 fun TeleDriveNavHost(
     navController: NavHostController,
+    securePrefs: SecurePrefs,
+    isFirstTimeSetup: Boolean,
     modifier: Modifier = Modifier,
     startDestination: Route = Route.Login
 ) {
@@ -47,8 +51,25 @@ fun TeleDriveNavHost(
         composable<Route.MasterPassword> {
             MasterPasswordScreen(
                 onUnlocked = {
+                    if (isFirstTimeSetup) {
+                        navController.navigate(Route.SecurityPreferences) {
+                            popUpTo(Route.MasterPassword) { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(Route.Home) {
+                            popUpTo(Route.MasterPassword) { inclusive = true }
+                        }
+                    }
+                }
+            )
+        }
+
+        composable<Route.SecurityPreferences> {
+            SecurityPreferencesScreen(
+                securePrefs = securePrefs,
+                onContinue = {
                     navController.navigate(Route.Home) {
-                        popUpTo(Route.MasterPassword) { inclusive = true }
+                        popUpTo(Route.SecurityPreferences) { inclusive = true }
                     }
                 }
             )
@@ -83,4 +104,3 @@ fun TeleDriveNavHost(
         }
     }
 }
-
