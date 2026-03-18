@@ -2,6 +2,8 @@ package com.sinxn.teledrive.data.telegram
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
@@ -35,13 +37,16 @@ class TelegramClient @Inject constructor() {
     }
 
     private var client: Client? = null
+    
+    // Broadcasts all unsolicited updates from Telegram (new messages, auth state, file progress).
+    // extraBufferCapacity allows bursts of events during initialization/sync.
+    private val _updates = MutableSharedFlow<TdApi.Object>(extraBufferCapacity = 100)
+    val updates = _updates.asSharedFlow()
 
     /**
      * Creates and initializes the TDLib client.
-     * The [updateHandler] receives all unsolicited updates from Telegram
-     * (new messages, auth state changes, etc.).
      */
-    fun create(updateHandler: (TdApi.Object) -> Unit = { }) {
+    fun create() {
         if (client != null) {
             Log.w(TAG, "TDLib client already created, ignoring duplicate create()")
             return
@@ -51,7 +56,7 @@ class TelegramClient @Inject constructor() {
         Client.execute(TdApi.SetLogVerbosityLevel(2))
 
         client = Client.create(
-            /* updateHandler = */ { update -> updateHandler(update) },
+            /* updateHandler = */ { update -> _updates.tryEmit(update) },
             /* updateExceptionHandler = */ { e ->
                 Log.e(TAG, "TDLib update exception", e)
             },

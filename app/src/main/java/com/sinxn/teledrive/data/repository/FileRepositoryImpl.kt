@@ -5,8 +5,12 @@ import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,6 +25,27 @@ class FileRepositoryImpl @Inject constructor(
     private val fileDao: FileDao,
     private val telegramClient: TelegramClient
 ) : FileRepository {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        scope.launch {
+            telegramClient.updates.collect { update ->
+                when (update) {
+                    is TdApi.UpdateFile -> {
+                        val file = update.file
+                        if (file.remote.isUploadingActive && file.expectedSize > 0) {
+                            val progress = file.remote.uploadedSize.toFloat() / file.expectedSize.toFloat()
+                            fileDao.updateUploadProgress(file.id.toString(), progress)
+                        } else if (file.remote.isUploadingCompleted) {
+                            fileDao.updateUploadProgress(file.id.toString(), 1.0f)
+                        }
+                    }
+                    // We can also listen to UpdateNewMessage here in the future to auto-insert finished uploads
+                }
+            }
+        }
+    }
 
     override fun getFilesByParent(parentId: String?, userId: String): Flow<List<FileEntity>> =
         fileDao.getFilesByParent(parentId, userId).map { fileList ->

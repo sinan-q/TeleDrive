@@ -5,9 +5,13 @@ import android.util.Log
 import com.sinxn.teledrive.BuildConfig
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
@@ -34,15 +38,22 @@ class AuthManager @Inject constructor(
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
+    // Scope for collecting SharedFlow events from TelegramClient
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /**
      * Starts the TDLib client and begins listening for auth state updates.
      * Call this once from the Application or ViewModel.
      */
     fun startClient() {
-        telegramClient.create { update ->
-            when (update) {
-                is TdApi.UpdateAuthorizationState -> handleAuthState(update.authorizationState)
-                else -> { /* Other updates handled elsewhere in later sprints */ }
+        telegramClient.create()
+        
+        scope.launch {
+            telegramClient.updates.collect { update ->
+                when (update) {
+                    is TdApi.UpdateAuthorizationState -> handleAuthState(update.authorizationState)
+                    else -> { /* Other updates handled by repositories */ }
+                }
             }
         }
     }

@@ -40,6 +40,10 @@ interface FileDao {
     @Query("UPDATE files SET deleted_at = :timestamp WHERE id = :id")
     suspend fun softDeleteFile(id: String, timestamp: Long = System.currentTimeMillis())
 
+    /** Update the upload progress of an active file (0.0 to 1.0) */
+    @Query("UPDATE files SET upload_progress = :progress WHERE file_id = :fileId")
+    suspend fun updateUploadProgress(fileId: String, progress: Float)
+
     /** Search files by name (case-insensitive) */
     @Query("""
         SELECT * FROM files 
