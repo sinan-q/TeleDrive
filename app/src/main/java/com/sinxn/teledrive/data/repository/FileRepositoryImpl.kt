@@ -5,6 +5,7 @@ import android.util.Log
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -28,7 +29,8 @@ class FileRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val fileDao: FileDao,
     private val telegramClient: TelegramClient,
-    private val securePrefs: SecurePrefs
+    private val securePrefs: SecurePrefs,
+    private val fileCryptor: FileCryptor
 ) : FileRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -38,6 +40,13 @@ class FileRepositoryImpl @Inject constructor(
 
     /** Maps a pending upload's raw file name back to its target folder's parentId */
     private val pendingUploadParents = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Maps an encrypted TG filename (e.g. "report.pdf.enc") back to its original metadata
+     * so we can display the clean name and mime type in Room.
+     */
+    data class UploadMeta(val originalName: String, val mimeType: String?)
+    private val pendingUploadMeta = java.util.concurrent.ConcurrentHashMap<String, UploadMeta>()
 
     init {
         scope.launch {
@@ -78,14 +87,24 @@ class FileRepositoryImpl @Inject constructor(
                         if (activeUserId != null) {
                             val entity = update.message.toFileEntity(activeUserId)
                             if (entity != null) {
-                                // If we initiated this upload from a specific folder, re-attach its parent mapping
-                                val parentId = pendingUploadParents.remove(entity.name)
-                                val entityToInsert = if (parentId != null) {
-                                    entity.copy(parentId = parentId)
+                                // Strip .enc extension and restore original metadata if this was our upload
+                                val meta = pendingUploadMeta.remove(entity.name)
+                                val cleanEntity = if (meta != null) {
+                                    entity.copy(
+                                        name = meta.originalName,
+                                        mimeType = meta.mimeType
+                                    )
+                                } else if (entity.name.endsWith(".enc")) {
+                                    // Fallback: strip .enc even if we lost the meta map entry
+                                    entity.copy(name = entity.name.removeSuffix(".enc"))
                                 } else entity
 
-                                // Auto-insert new finished uploads or remote syncs into Room directly.
-                                // Room's IGNORE strategy ensures we don't clobber existing ones.
+                                // Re-attach parent folder mapping using the ORIGINAL name
+                                val parentId = pendingUploadParents.remove(cleanEntity.name)
+                                val entityToInsert = if (parentId != null) {
+                                    cleanEntity.copy(parentId = parentId)
+                                } else cleanEntity
+
                                 fileDao.insertFile(entityToInsert)
                             }
                         }
@@ -186,10 +205,23 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun uploadFile(filePath: String, userId: String, parentId: String?) {
         try {
+            val originalFile = java.io.File(filePath)
+            val originalName = originalFile.name
+
+            // Track the destination folder using the ORIGINAL filename
             if (parentId != null) {
-                val fileName = java.io.File(filePath).name
-                pendingUploadParents[fileName] = parentId
+                pendingUploadParents[originalName] = parentId
             }
+
+            // ── Encrypt the file ──────────────────────────────────────
+            val encFile = java.io.File(context.cacheDir, "$originalName.enc")
+            fileCryptor.encryptFile(originalFile, encFile)
+            Log.d("FileRepositoryImpl", "Encrypted $originalName -> ${encFile.name} (${encFile.length()} bytes)")
+
+            // Map the encrypted TG name back to the original clean name
+            val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(originalFile.extension)
+            pendingUploadMeta[encFile.name] = UploadMeta(originalName, mimeType)
 
             // Get our own ID to figure out the private chat ID (Saved Messages)
             val chat = telegramClient.send(
@@ -197,10 +229,9 @@ class FileRepositoryImpl @Inject constructor(
             ) as TdApi.Chat
             val savedMessagesChatId = chat.id
 
-            // Create InputFileLocal pointing to the physical file on device
-            val inputFile = TdApi.InputFileLocal(filePath)
+            // Create InputFileLocal pointing to the ENCRYPTED file
+            val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
             
-            // Wrap it in an InputMessageDocument to upload as a generic file
             val inputMessageContent = TdApi.InputMessageDocument(
                 inputFile,
                 null,           // thumbnail
@@ -208,30 +239,29 @@ class FileRepositoryImpl @Inject constructor(
                 null            // caption
             )
 
-            // Fire the SendMessage request 
             val sendMessage = TdApi.SendMessage(
                 savedMessagesChatId,
-                null,           // messageThreadId / replyToMessageId equivalent
-                null,           // replyTo
-                null,           // options
-                null,           // replyMarkup
+                null,
+                null,
+                null,
+                null,
                 inputMessageContent
             )
 
-            // SendAsync delegates the blocking chunk/upload work to TDLib's internal workers
             telegramClient.sendAsync(sendMessage) { result ->
                 if (result is TdApi.Error) {
-                    if (parentId != null) {
-                        val fileName = java.io.File(filePath).name
-                        pendingUploadParents.remove(fileName)
-                    }
+                    pendingUploadParents.remove(originalName)
+                    pendingUploadMeta.remove(encFile.name)
+                    encFile.delete()
                     Log.e("FileRepositoryImpl", "Failed to queue upload: ${result.message}")
                 } else {
-                    Log.d("FileRepositoryImpl", "Upload successfully queued to TDLib!")
+                    Log.d("FileRepositoryImpl", "Encrypted upload queued to TDLib!")
+                    // Clean up temp encrypted file after TDLib copies it to its internal buffer
+                    encFile.deleteOnExit()
                 }
             }
         } catch (e: Exception) {
-            Log.e("FileRepositoryImpl", "Error initiating file upload", e)
+            Log.e("FileRepositoryImpl", "Error initiating encrypted file upload", e)
             throw e
         }
     }
