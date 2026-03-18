@@ -62,12 +62,12 @@ class MainActivity : FragmentActivity() {
                     }
                     // Has session + has master password + auth enabled → show MasterPassword screen
                     hasMasterPassword -> {
-                        startDest = Route.MasterPassword
+                        startDest = Route.MasterPassword()
                         isFirstTimeSetup = false
                     }
                     // Has session but no master password → continue setup
                     else -> {
-                        startDest = Route.MasterPassword
+                        startDest = Route.MasterPassword()
                         isFirstTimeSetup = true
                     }
                 }

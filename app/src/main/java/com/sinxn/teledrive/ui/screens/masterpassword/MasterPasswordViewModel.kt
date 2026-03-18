@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import androidx.lifecycle.SavedStateHandle
 
 sealed interface MasterPasswordUiState {
     /** Waiting for user input */
@@ -26,8 +27,12 @@ sealed interface MasterPasswordUiState {
 @HiltViewModel
 class MasterPasswordViewModel @Inject constructor(
     private val encryptionManager: EncryptionManager,
-    private val securePrefs: SecurePrefs
+    private val securePrefs: SecurePrefs,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    /** True when the user chose "Sync existing files" in Storage Selection */
+    val isSyncMode: Boolean = savedStateHandle.get<Boolean>("isSyncMode") ?: false
 
     private val _uiState = MutableStateFlow<MasterPasswordUiState>(MasterPasswordUiState.Idle)
     val uiState: StateFlow<MasterPasswordUiState> = _uiState.asStateFlow()
@@ -39,6 +44,9 @@ class MasterPasswordViewModel @Inject constructor(
 
     /** True when this is the user's first time (setup mode), false when unlocking */
     val isSetupMode: Boolean get() = !encryptionManager.isPasswordSetUp()
+
+    /** True when in sync mode (first time but syncing existing files) */
+    val showSyncWarning: Boolean get() = isSyncMode && isSetupMode
 
     /**
      * First-time setup: set a new master password.
@@ -55,7 +63,13 @@ class MasterPasswordViewModel @Inject constructor(
 
         _uiState.value = MasterPasswordUiState.Deriving
         try {
-            encryptionManager.setupPassword(password)
+            if (isSyncMode) {
+                // Sync mode: set the password without local verification check
+                // (password will be verified implicitly when first file is decrypted)
+                encryptionManager.setSyncPassword(password)
+            } else {
+                encryptionManager.setupPassword(password)
+            }
             securePrefs.setBiometricPassword(password)
             _uiState.value = MasterPasswordUiState.Unlocked
         } catch (e: Exception) {

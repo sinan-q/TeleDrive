@@ -1,19 +1,27 @@
 package com.sinxn.teledrive.ui.screens.masterpassword
 
+import android.os.Build
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,12 +52,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.platform.LocalContext
-import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.compose.material.icons.filled.Info
 
+@RequiresApi(Build.VERSION_CODES.P)
 @Composable
 fun MasterPasswordScreen(
+    isSyncMode: Boolean = false,
     onUnlocked: () -> Unit,
     viewModel: MasterPasswordViewModel = hiltViewModel()
 ) {
@@ -90,7 +100,10 @@ fun MasterPasswordScreen(
                             viewModel.unlockWithBiometric()
                         }
 
-                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        override fun onAuthenticationError(
+                            errorCode: Int,
+                            errString: CharSequence
+                        ) {
                             super.onAuthenticationError(errorCode, errString)
                             viewModel.fallbackToPassword()
                         }
@@ -148,7 +161,11 @@ fun MasterPasswordScreen(
             // Subtitle
             Text(
                 text = if (isSetupMode) {
-                    "Create a master password to encrypt your files."
+                    if (viewModel.showSyncWarning) {
+                        "Enter the master password used for your existing files."
+                    } else {
+                        "Create a master password to encrypt your files."
+                    }
                 } else {
                     "Enter your master password to unlock your vault."
                 },
@@ -246,6 +263,36 @@ fun MasterPasswordScreen(
 
                         if (isSetupMode) {
                             Spacer(modifier = Modifier.height(16.dp))
+
+                            // Sync mode warning
+                            if (viewModel.showSyncWarning) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Info,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "This password must match the one used to encrypt your existing files. If incorrect, files will fail to decrypt.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
                             Text(
                                 text = "⚠️ If you forget this password and lose access to this app/device (e.g., after a reset), your encrypted files cannot be recovered.",
                                 style = MaterialTheme.typography.bodySmall,

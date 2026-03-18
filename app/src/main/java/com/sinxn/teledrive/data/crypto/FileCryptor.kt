@@ -9,7 +9,9 @@ import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,8 +27,8 @@ import javax.inject.Singleton
  * └──────────────┴──────────────┴───────────────────────────────────┘
  * ```
  *
- * - **Salt**: Used with PBKDF2 to derive the AES key from the master password.
- *             Stored per-file so each `.enc` file is independently decryptable.
+ * - **Salt**: Used with the raw master password via PBKDF2 to derive a unique
+ *             per-file AES-256 key. Each file gets a fresh random salt.
  * - **IV (Nonce)**: 12-byte random nonce for GCM. Must be unique per encryption.
  * - **Ciphertext + Tag**: Standard AES-GCM output. The 16-byte authentication tag
  *                          is appended automatically by the JCE GCM implementation.
@@ -68,21 +70,21 @@ class FileCryptor @Inject constructor(
     /**
      * Encrypts [inputFile] and writes the result to [outputFile].
      *
-     * The master password's derived key is used, but a **fresh per-file salt** is generated
-     * so that each encrypted file is independently decryptable with just the password.
+     * The raw master password is combined with a fresh random salt via PBKDF2
+     * to derive a unique AES-256 key for this file.
      *
      * @return the output file (for chaining)
      */
     fun encryptFile(inputFile: File, outputFile: File): File {
-        val masterPassword = encryptionManager.getDerivedKey()
+        val password = encryptionManager.getSessionPassword()
 
         // Generate fresh per-file salt and IV
         val random = SecureRandom()
         val salt = ByteArray(SALT_LENGTH_BYTES).also { random.nextBytes(it) }
         val iv = ByteArray(GCM_IV_LENGTH_BYTES).also { random.nextBytes(it) }
 
-        // Derive a per-file AES key from the master key + per-file salt
-        val perFileKey = derivePerFileKey(masterPassword, salt)
+        // Derive a per-file AES key from the raw password + per-file salt
+        val perFileKey = derivePerFileKey(password, salt)
         val secretKey = SecretKeySpec(perFileKey, "AES")
 
         val cipher = Cipher.getInstance(AES_ALGORITHM)
@@ -108,13 +110,13 @@ class FileCryptor @Inject constructor(
      * Decrypts [inputFile] (a .enc file) and writes the plaintext to [outputFile].
      *
      * Reads the 28-byte header (salt + IV) from the encrypted file, derives the AES key
-     * using the master password, and streams the decrypted content out.
+     * using the raw master password, and streams the decrypted content out.
      *
      * @return the output file (for chaining)
      * @throws javax.crypto.AEADBadTagException if the password is wrong or data was tampered with
      */
     fun decryptFile(inputFile: File, outputFile: File): File {
-        val masterPassword = encryptionManager.getDerivedKey()
+        val password = encryptionManager.getSessionPassword()
 
         FileInputStream(inputFile).use { fis ->
             // Read the fixed header
@@ -124,7 +126,7 @@ class FileCryptor @Inject constructor(
             fis.readExactly(iv)
 
             // Derive the per-file AES key
-            val perFileKey = derivePerFileKey(masterPassword, salt)
+            val perFileKey = derivePerFileKey(password, salt)
             val secretKey = SecretKeySpec(perFileKey, "AES")
 
             val cipher = Cipher.getInstance(AES_ALGORITHM)
@@ -147,13 +149,13 @@ class FileCryptor @Inject constructor(
      * @return ByteArray in the format: [16B salt][12B iv][ciphertext + tag]
      */
     fun encryptBytes(plaintext: ByteArray): ByteArray {
-        val masterPassword = encryptionManager.getDerivedKey()
+        val password = encryptionManager.getSessionPassword()
 
         val random = SecureRandom()
         val salt = ByteArray(SALT_LENGTH_BYTES).also { random.nextBytes(it) }
         val iv = ByteArray(GCM_IV_LENGTH_BYTES).also { random.nextBytes(it) }
 
-        val perFileKey = derivePerFileKey(masterPassword, salt)
+        val perFileKey = derivePerFileKey(password, salt)
         val secretKey = SecretKeySpec(perFileKey, "AES")
 
         val cipher = Cipher.getInstance(AES_ALGORITHM)
@@ -169,13 +171,13 @@ class FileCryptor @Inject constructor(
      * @return the original plaintext bytes
      */
     fun decryptBytes(encrypted: ByteArray): ByteArray {
-        val masterPassword = encryptionManager.getDerivedKey()
+        val password = encryptionManager.getSessionPassword()
 
         val salt = encrypted.copyOfRange(0, SALT_LENGTH_BYTES)
         val iv = encrypted.copyOfRange(SALT_LENGTH_BYTES, HEADER_SIZE)
         val ciphertext = encrypted.copyOfRange(HEADER_SIZE, encrypted.size)
 
-        val perFileKey = derivePerFileKey(masterPassword, salt)
+        val perFileKey = derivePerFileKey(password, salt)
         val secretKey = SecretKeySpec(perFileKey, "AES")
 
         val cipher = Cipher.getInstance(AES_ALGORITHM)
@@ -187,18 +189,20 @@ class FileCryptor @Inject constructor(
     // ── Private helpers ──────────────────────────────────────────────
 
     /**
-     * Derives a per-file AES-256 key from the master key bytes and the per-file salt
-     * using PBKDF2. This ensures each file has a unique encryption key even though
-     * the master password is the same.
+     * Derives a per-file AES-256 key from the raw master password and the per-file salt
+     * using PBKDF2-HMAC-SHA256 with 100,000 iterations.
+     *
+     * This is the only key derivation step. Each .enc file is fully self-contained:
+     * you only need the password + the salt embedded in the file header to decrypt it.
      */
-    private fun derivePerFileKey(masterKeyBytes: ByteArray, salt: ByteArray): ByteArray {
-        val spec = javax.crypto.spec.PBEKeySpec(
-            android.util.Base64.encodeToString(masterKeyBytes, android.util.Base64.NO_WRAP).toCharArray(),
+    private fun derivePerFileKey(password: String, salt: ByteArray): ByteArray {
+        val spec = PBEKeySpec(
+            password.toCharArray(),
             salt,
             PBKDF2_ITERATIONS,
             KEY_LENGTH_BITS
         )
-        val factory = javax.crypto.SecretKeyFactory.getInstance(PBKDF2_ALGORITHM)
+        val factory = SecretKeyFactory.getInstance(PBKDF2_ALGORITHM)
         return factory.generateSecret(spec).encoded
     }
 

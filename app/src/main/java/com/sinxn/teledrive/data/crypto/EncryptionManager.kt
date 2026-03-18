@@ -11,11 +11,17 @@ import javax.inject.Singleton
 /**
  * Manages password-based key derivation and verification for client-side encryption.
  *
- * Uses PBKDF2WithHmacSHA256 to derive a 256-bit AES key from the user's master password.
- * The derived key is held in RAM only for the duration of the session; it is never persisted.
+ * ## KeePass-Style Architecture
  *
- * Binary format for encrypted files:
- *   [16 bytes PBKDF2 Salt] + [12 bytes GCM IV] + [Encrypted Bytes] + [16 bytes GCM Auth Tag]
+ * The raw master password is held in memory for the session duration; it is never
+ * persisted to disk. Each `.enc` file is self-contained: it carries its own random
+ * 16-byte salt which, combined with the in-memory password, derives a unique per-file
+ * AES-256 key via PBKDF2-HMAC-SHA256 (100,000 iterations).
+ *
+ * A local verification hash (password + random verification salt → PBKDF2) is stored
+ * in SecurePrefs purely to validate the password at app launch. This local hash is
+ * **not** used for file encryption — files can be decrypted on any device or with
+ * external tools using only the password.
  */
 @Singleton
 class EncryptionManager @Inject constructor(
@@ -28,16 +34,19 @@ class EncryptionManager @Inject constructor(
         private const val ALGORITHM = "PBKDF2WithHmacSHA256"
     }
 
-    /** The session-only derived key bytes. Null until the user unlocks. */
+    /** The session-only raw password. Null until the user unlocks. */
     @Volatile
-    private var _derivedKeyBytes: ByteArray? = null
+    private var _sessionPassword: String? = null
 
     /** Public read-only accessor. Non-null means the vault is unlocked. */
-    val isUnlocked: Boolean get() = _derivedKeyBytes != null
+    val isUnlocked: Boolean get() = _sessionPassword != null
 
-    /** Get the derived key bytes. Throws if not unlocked. */
-    fun getDerivedKey(): ByteArray {
-        return _derivedKeyBytes
+    /**
+     * Get the raw session password. Throws if not unlocked.
+     * Used by [FileCryptor] to derive per-file AES keys.
+     */
+    fun getSessionPassword(): String {
+        return _sessionPassword
             ?: throw IllegalStateException("Vault is locked. Call unlockWithPassword() first.")
     }
 
@@ -47,27 +56,24 @@ class EncryptionManager @Inject constructor(
     fun isPasswordSetUp(): Boolean = securePrefs.hasMasterPassword()
 
     /**
-     * First-time setup: derives a key from [password], stores a verification hash + salt
-     * in SecurePrefs, and keeps the derived key in RAM for the session.
+     * First-time setup: stores a verification hash + salt in SecurePrefs
+     * and keeps the raw password in RAM for the session.
      */
     fun setupPassword(password: String) {
         val salt = generateSalt()
-        val keyBytes = deriveKey(password, salt)
-
-        // Store a verification hash (hash the derived key itself) so we can verify future logins
-        val verificationHash = hashForVerification(keyBytes)
+        val verificationHash = deriveVerificationHash(password, salt)
 
         securePrefs.setMasterPasswordHash(
             hash = Base64.encodeToString(verificationHash, Base64.NO_WRAP),
             salt = Base64.encodeToString(salt, Base64.NO_WRAP)
         )
 
-        _derivedKeyBytes = keyBytes
+        _sessionPassword = password
     }
 
     /**
-     * Subsequent unlocks: derives the key from [password] using the stored salt,
-     * then verifies it matches the stored hash.
+     * Subsequent unlocks: derives a verification hash from [password] using the
+     * stored salt and checks it against the stored hash.
      *
      * @return true if the password is correct and the vault is now unlocked.
      */
@@ -76,13 +82,11 @@ class EncryptionManager @Inject constructor(
         val storedHashB64 = securePrefs.getMasterPasswordHash() ?: return false
 
         val salt = Base64.decode(saltB64, Base64.NO_WRAP)
-        val keyBytes = deriveKey(password, salt)
-
-        val verificationHash = hashForVerification(keyBytes)
+        val verificationHash = deriveVerificationHash(password, salt)
         val expectedHash = Base64.decode(storedHashB64, Base64.NO_WRAP)
 
         return if (verificationHash.contentEquals(expectedHash)) {
-            _derivedKeyBytes = keyBytes
+            _sessionPassword = password
             true
         } else {
             false
@@ -90,11 +94,31 @@ class EncryptionManager @Inject constructor(
     }
 
     /**
-     * Lock the vault (clear the in-memory key).
+     * Sync mode: sets the session password directly without local verification.
+     * Used when the user is syncing to a new device and there is no local verification
+     * hash to compare against. The password will be verified implicitly when the first
+     * `.enc` file is decrypted (AES-GCM will throw AEADBadTagException if wrong).
+     *
+     * Also creates a new local verification hash so future unlocks work normally.
+     */
+    fun setSyncPassword(password: String) {
+        // Store the password for this session
+        _sessionPassword = password
+
+        // Create fresh local verification data so subsequent opens work normally
+        val salt = generateSalt()
+        val verificationHash = deriveVerificationHash(password, salt)
+        securePrefs.setMasterPasswordHash(
+            hash = Base64.encodeToString(verificationHash, Base64.NO_WRAP),
+            salt = Base64.encodeToString(salt, Base64.NO_WRAP)
+        )
+    }
+
+    /**
+     * Lock the vault (clear the in-memory password).
      */
     fun lock() {
-        _derivedKeyBytes?.fill(0)
-        _derivedKeyBytes = null
+        _sessionPassword = null
     }
 
     // ── Private helpers ──────────────────────────────────────────────
@@ -105,25 +129,12 @@ class EncryptionManager @Inject constructor(
         return salt
     }
 
-    private fun deriveKey(password: String, salt: ByteArray): ByteArray {
-        val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, KEY_LENGTH_BITS)
-        val factory = SecretKeyFactory.getInstance(ALGORITHM)
-        return factory.generateSecret(spec).encoded
-    }
-
     /**
-     * Produces a secondary hash of the derived key bytes for password verification purposes.
-     * We re-derive once more with a fixed "verify" salt so the stored hash cannot be used
-     * to reconstruct the actual encryption key.
+     * Derives a verification hash from the password and salt using PBKDF2.
+     * This hash is stored locally purely to verify the password at app launch.
      */
-    private fun hashForVerification(keyBytes: ByteArray): ByteArray {
-        val verifySalt = "teledrive_verify".toByteArray(Charsets.UTF_8)
-        val spec = PBEKeySpec(
-            Base64.encodeToString(keyBytes, Base64.NO_WRAP).toCharArray(),
-            verifySalt,
-            1, // single iteration — just a hash, not key stretching
-            256
-        )
+    private fun deriveVerificationHash(password: String, salt: ByteArray): ByteArray {
+        val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, KEY_LENGTH_BITS)
         val factory = SecretKeyFactory.getInstance(ALGORITHM)
         return factory.generateSecret(spec).encoded
     }

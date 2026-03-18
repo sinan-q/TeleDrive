@@ -15,7 +15,7 @@ sealed interface Route {
     data object StorageSelection : Route
 
     @Serializable
-    data object MasterPassword : Route
+    data class MasterPassword(val isSyncMode: Boolean = false) : Route
 
     @Serializable
     data object SecurityPreferences : Route

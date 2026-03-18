@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import androidx.navigation.toRoute
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.ui.screens.home.HomeScreen
@@ -40,24 +41,26 @@ fun TeleDriveNavHost(
 
         composable<Route.StorageSelection> {
             StorageSelectionScreen(
-                onContinue = {
-                    navController.navigate(Route.MasterPassword) {
+                onContinue = { isSyncMode ->
+                    navController.navigate(Route.MasterPassword(isSyncMode = isSyncMode)) {
                         popUpTo(Route.StorageSelection) { inclusive = true }
                     }
                 }
             )
         }
 
-        composable<Route.MasterPassword> {
+        composable<Route.MasterPassword> { backStackEntry ->
+            val masterPasswordRoute = backStackEntry.toRoute<Route.MasterPassword>()
             MasterPasswordScreen(
+                isSyncMode = masterPasswordRoute.isSyncMode,
                 onUnlocked = {
                     if (isFirstTimeSetup) {
                         navController.navigate(Route.SecurityPreferences) {
-                            popUpTo(Route.MasterPassword) { inclusive = true }
+                            popUpTo<Route.MasterPassword> { inclusive = true }
                         }
                     } else {
                         navController.navigate(Route.Home) {
-                            popUpTo(Route.MasterPassword) { inclusive = true }
+                            popUpTo<Route.MasterPassword> { inclusive = true }
                         }
                     }
                 }
