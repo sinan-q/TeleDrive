@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Settings
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.ui.screens.home.components.BreadcrumbsBar
 import com.sinxn.teledrive.ui.screens.home.components.CreateFolderDialog
+import com.sinxn.teledrive.ui.screens.home.components.EmptyStateView
+import com.sinxn.teledrive.ui.screens.home.components.ErrorStateView
 import com.sinxn.teledrive.ui.screens.home.components.FileListView
 import com.sinxn.teledrive.ui.screens.home.components.FileGridView
 import com.sinxn.teledrive.ui.screens.home.components.MoveToFolderDialog
@@ -27,9 +29,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +66,14 @@ fun HomeScreen(
     var fileToRename by remember { mutableStateOf<FileEntity?>(null) }
     var fileToMove by remember { mutableStateOf<FileEntity?>(null) }
     val folders by viewModel.folders.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Collect one-shot snackbar events
+    LaunchedEffect(Unit) {
+        viewModel.snackbarEvents.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     // Launcher for Android System File Picker
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -101,7 +114,8 @@ fun HomeScreen(
             }) {
                 Icon(Icons.Default.Add, contentDescription = "Upload File")
             }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         Box(
             modifier = modifier
@@ -113,17 +127,16 @@ fun HomeScreen(
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
                 is HomeUiState.Error -> {
-                    Text(
-                        text = "Error: ${state.message}",
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.align(Alignment.Center).padding(16.dp)
+                    ErrorStateView(
+                        message = state.message,
+                        onRetry = { viewModel.retrySync() },
+                        modifier = Modifier.align(Alignment.Center).padding(32.dp)
                     )
                 }
                 is HomeUiState.Success -> {
                     if (state.files.isEmpty()) {
-                        Text(
-                            text = "No saved files found.",
-                            modifier = Modifier.align(Alignment.Center)
+                        EmptyStateView(
+                            modifier = Modifier.align(Alignment.Center).padding(32.dp)
                         )
                     } else {
                         AnimatedContent(targetState = isGridView, label = "view_toggle") { gridMode ->

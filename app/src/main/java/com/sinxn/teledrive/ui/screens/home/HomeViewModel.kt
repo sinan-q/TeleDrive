@@ -11,8 +11,11 @@ import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
@@ -49,6 +52,10 @@ class HomeViewModel @Inject constructor(
     private val currentFolder = MutableStateFlow<FileEntity?>(null)
     private var observeJob: Job? = null
     private var userId: String = ""
+
+    /** One-shot events for Snackbar messages */
+    private val _snackbarEvents = MutableSharedFlow<String>()
+    val snackbarEvents: SharedFlow<String> = _snackbarEvents.asSharedFlow()
 
     init {
         loadFiles()
@@ -87,11 +94,17 @@ class HomeViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Failed to sync Home screen data", e)
                 if (cachedUserId == null) {
-                    // Only show full error if we have no cached data to fall back on
                     _uiState.value = HomeUiState.Error(e.message ?: "Unknown error occurred")
+                } else {
+                    _snackbarEvents.emit("Sync failed. Showing cached files.")
                 }
             }
         }
+    }
+
+    /** Retry initial load/sync — called from the error state UI */
+    fun retrySync() {
+        loadFiles()
     }
 
     private fun observeCurrentFolder() {
@@ -196,8 +209,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 fileRepository.downloadFile(file)
+                _snackbarEvents.emit("Downloading \"${file.name}\"...")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error initiating file download", e)
+                _snackbarEvents.emit("Failed to download \"${file.name}\"")
             }
         }
     }
@@ -206,9 +221,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 fileRepository.deleteFile(file)
-                Log.d("HomeViewModel", "Deleted file: ${file.name}")
+                _snackbarEvents.emit("\"${file.name}\" deleted")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error deleting file", e)
+                _snackbarEvents.emit("Failed to delete \"${file.name}\"")
             }
         }
     }
@@ -217,8 +233,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 fileRepository.renameFile(id, newName)
+                _snackbarEvents.emit("Renamed to \"$newName\"")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error renaming file", e)
+                _snackbarEvents.emit("Failed to rename")
             }
         }
     }
@@ -241,8 +259,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 fileRepository.moveFile(id, newParentId)
+                _snackbarEvents.emit("File moved")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error moving file", e)
+                _snackbarEvents.emit("Failed to move file")
             }
         }
     }
