@@ -345,7 +345,8 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun syncExistingFiles(userId: String) {
         try {
-            _syncStatus.value = SyncStatus.Syncing(0)
+            var currentMetrics = com.sinxn.teledrive.data.model.SyncMetrics()
+            _syncStatus.value = SyncStatus.Syncing(currentMetrics)
             
             val configuredChatId = securePrefs.getStorageChannelId()
             val targetChatId = if (configuredChatId != null) {
@@ -359,30 +360,51 @@ class FileRepositoryImpl @Inject constructor(
 
             Log.d("FileRepositoryImpl", "Starting existing files sync for chat $targetChatId")
             
+            // Ensure chat is opened so TDLib syncs it from server
+            telegramClient.send(TdApi.OpenChat(targetChatId))
+
             var lastMsgId = 0L
-            var totalSynced = 0
             
             // Loop to fetch history in batches of 100
             while (true) {
-                val result = telegramClient.send(
-                    TdApi.GetChatHistory(targetChatId, lastMsgId, 0, 100, false)
-                ) as TdApi.Messages
+                val searchResult = telegramClient.send(
+                    TdApi.SearchChatMessages(targetChatId, null, "", null, lastMsgId, 0, 100, TdApi.SearchMessagesFilterDocument())
+                )
                 
-                if (result.messages.isEmpty()) break
-                
-                val entitiesToInsert = result.messages.mapNotNull { it.toFileEntity(userId) }
-                if (entitiesToInsert.isNotEmpty()) {
-                    fileDao.insertFiles(entitiesToInsert)
-                    totalSynced += entitiesToInsert.size
-                    _syncStatus.value = SyncStatus.Syncing(totalSynced)
+                val messages = when (searchResult) {
+                    is TdApi.Messages -> searchResult.messages
+                    is TdApi.FoundChatMessages -> searchResult.messages
+                    else -> break
                 }
                 
-                lastMsgId = result.messages.last().id
-                if (result.messages.size < 100) break
+                if (messages.isEmpty()) break
+                
+                // Track metrics
+                val scannedBatch = messages.size
+                val docsInBatch = messages.filter { it.content is TdApi.MessageDocument }
+                val filenamesInBatch = docsInBatch.mapNotNull { 
+                    (it.content as TdApi.MessageDocument).document.fileName.takeIf { name -> name.isNotBlank() }
+                }
+                val entitiesToInsert = messages.mapNotNull { it.toFileEntity(userId) }
+                
+                currentMetrics = currentMetrics.copy(
+                    messagesScanned = currentMetrics.messagesScanned + scannedBatch,
+                    totalDocumentsFound = currentMetrics.totalDocumentsFound + docsInBatch.size,
+                    encFilesMatched = currentMetrics.encFilesMatched + entitiesToInsert.size,
+                    foundFilenames = currentMetrics.foundFilenames + filenamesInBatch
+                )
+                
+                if (entitiesToInsert.isNotEmpty()) {
+                    fileDao.insertFiles(entitiesToInsert)
+                    _syncStatus.value = SyncStatus.Syncing(currentMetrics)
+                }
+                
+                lastMsgId = messages.last().id
+                if (messages.size < 100) break
             }
             
-            Log.d("FileRepositoryImpl", "Sync completed. Total files found and added: $totalSynced")
-            _syncStatus.value = SyncStatus.Completed(totalSynced)
+            Log.d("FileRepositoryImpl", "Sync completed. Metrics: $currentMetrics")
+            _syncStatus.value = SyncStatus.Completed(currentMetrics)
         } catch (e: Exception) {
             Log.e("FileRepositoryImpl", "Error syncing existing files", e)
             _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during sync")

@@ -3,16 +3,22 @@ package com.sinxn.teledrive.data.model
 /**
  * Represents the current state of the Telegram file sync crawler.
  */
+/**
+ * Detailed metrics for the sync process.
+ */
+data class SyncMetrics(
+    val messagesScanned: Int = 0,
+    val totalDocumentsFound: Int = 0,
+    val encFilesMatched: Int = 0,
+    val foundFilenames: List<String> = emptyList()
+)
+
 sealed class SyncStatus {
-    /** Crawler is not running. */
     object Idle : SyncStatus()
 
-    /** Crawler is currently scanning chat history. */
-    data class Syncing(val processedCount: Int) : SyncStatus()
+    data class Syncing(val metrics: SyncMetrics) : SyncStatus()
 
-    /** Crawler finished successfully. */
-    data class Completed(val importedCount: Int) : SyncStatus()
+    data class Completed(val metrics: SyncMetrics) : SyncStatus()
 
-    /** Crawler failed with an error. */
     data class Error(val message: String) : SyncStatus()
 }

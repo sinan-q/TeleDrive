@@ -36,7 +36,7 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
 
     return when (val content = this.content) {
         is TdApi.MessageDocument -> {
-            val fileName = content.document.fileName.takeIf { it.isNotBlank() } ?: "Unknown Document"
+            val fileName = content.document.fileName.trim().takeIf { it.isNotBlank() } ?: "Unknown Document"
             
             // Only accept encrypted files uploaded by TeleDrive
             if (!fileName.endsWith(".enc", ignoreCase = true)) {

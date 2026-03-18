@@ -3,6 +3,7 @@ package com.sinxn.teledrive.ui.screens.sync
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -58,11 +61,17 @@ fun SyncProgressScreen(
                                 style = MaterialTheme.typography.titleLarge
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            val count = if (status is SyncStatus.Syncing) status.processedCount else 0
+                            val metrics = if (status is SyncStatus.Syncing) status.metrics else com.sinxn.teledrive.data.model.SyncMetrics()
                             Text(
-                                text = "Found and imported $count items",
+                                text = "Found and imported ${metrics.encFilesMatched} items",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Scanned ${metrics.messagesScanned} messages...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
@@ -89,11 +98,56 @@ fun SyncProgressScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Successfully imported ${status.importedCount} encrypted files from your storage.",
+                                text = "Successfully imported ${status.metrics.encFilesMatched} encrypted files from your storage.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            // Diagnostic stats
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Diagnostic Info", style = MaterialTheme.typography.labelLarge)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    DetailRow("Messages Scanned", status.metrics.messagesScanned.toString())
+                                    DetailRow("Documents Found", status.metrics.totalDocumentsFound.toString())
+                                    DetailRow("Encrypted Matches", status.metrics.encFilesMatched.toString())
+                                    
+                                    if (status.metrics.foundFilenames.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text("Filenames Seen:", style = MaterialTheme.typography.labelMedium)
+                                        status.metrics.foundFilenames.take(15).forEach { name ->
+                                            Text(
+                                                text = "• $name",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (name.endsWith(".enc", ignoreCase = true)) 
+                                                    MaterialTheme.colorScheme.primary 
+                                                else MaterialTheme.colorScheme.outline
+                                            )
+                                        }
+                                        if (status.metrics.foundFilenames.size > 15) {
+                                            Text("...and ${status.metrics.foundFilenames.size - 15} more", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+
+                                    if (status.metrics.totalDocumentsFound > status.metrics.encFilesMatched) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = "Note: ${status.metrics.totalDocumentsFound - status.metrics.encFilesMatched} documents were skipped because they don't have the .enc extension.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                            
                             Spacer(modifier = Modifier.height(32.dp))
                             Button(
                                 onClick = onContinue,
@@ -145,6 +199,17 @@ fun SyncProgressScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall)
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
     }
 }
 
