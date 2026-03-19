@@ -26,6 +26,7 @@ fun StorageSelectionScreen(
     viewModel: StorageSelectionViewModel = hiltViewModel()
 ) {
     val selectedChannelName by viewModel.selectedChannelName.collectAsState()
+    val selectedChannelKind by viewModel.selectedChannelKind.collectAsState()
     var showChannelPicker by remember { mutableStateOf(false) }
     var syncExistingFiles by remember { mutableStateOf(false) }
 
@@ -58,7 +59,7 @@ fun StorageSelectionScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Icon(
-                imageVector = Icons.Default.Storage,
+                imageVector = selectedChannelKind.icon(),
                 contentDescription = null,
                 modifier = Modifier.size(72.dp),
                 tint = MaterialTheme.colorScheme.primary
@@ -98,7 +99,7 @@ fun StorageSelectionScreen(
                     headlineContent = { Text("Storage Location") },
                     supportingContent = { Text(selectedChannelName) },
                     leadingContent = {
-                        Icon(Icons.Default.Storage, contentDescription = null)
+                        Icon(selectedChannelKind.icon(), contentDescription = null)
                     },
                     trailingContent = {
                         Icon(Icons.Default.ChevronRight, contentDescription = "Change")
@@ -179,8 +180,8 @@ fun StorageSelectionScreen(
             StoragePickerBottomSheet(
                 viewModel = viewModel,
                 onDismiss = { showChannelPicker = false },
-                onChannelSelected = { id, title ->
-                    viewModel.selectChannel(id, title)
+                onChannelSelected = { id, title, kind ->
+                    viewModel.selectChannel(id, title, kind)
                     showChannelPicker = false
                 }
             )
@@ -193,7 +194,7 @@ fun StorageSelectionScreen(
 private fun StoragePickerBottomSheet(
     viewModel: StorageSelectionViewModel,
     onDismiss: () -> Unit,
-    onChannelSelected: (Long, String) -> Unit
+    onChannelSelected: (Long, String, StorageLocationKind) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val chats by viewModel.chats.collectAsState()
@@ -238,13 +239,12 @@ private fun StoragePickerBottomSheet(
                     items(chats, key = { it.id }) { chat ->
                         ListItem(
                             headlineContent = { Text(chat.title) },
-                            supportingContent = {
-                                if (chat.id == 0L) Text("Your private cloud")
-                                else if (chat.isChannel) Text("Channel")
-                                else Text("Group/Chat")
+                            supportingContent = { Text(chat.kind.label()) },
+                            leadingContent = {
+                                Icon(chat.kind.icon(), contentDescription = null)
                             },
                             modifier = Modifier.clickable {
-                                onChannelSelected(chat.id, chat.title)
+                                onChannelSelected(chat.id, chat.title, chat.kind)
                             }
                         )
                     }

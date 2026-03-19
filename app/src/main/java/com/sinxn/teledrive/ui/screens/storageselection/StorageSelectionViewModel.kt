@@ -12,12 +12,6 @@ import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 
-data class SelectableChat(
-    val id: Long,
-    val title: String,
-    val isChannel: Boolean
-)
-
 @HiltViewModel
 class StorageSelectionViewModel @Inject constructor(
     private val securePrefs: SecurePrefs,
@@ -29,11 +23,40 @@ class StorageSelectionViewModel @Inject constructor(
     )
     val selectedChannelName: StateFlow<String> = _selectedChannelName.asStateFlow()
 
-    private val _chats = MutableStateFlow<List<SelectableChat>>(emptyList())
-    val chats: StateFlow<List<SelectableChat>> = _chats.asStateFlow()
+    private val _selectedChannelKind = MutableStateFlow(StorageLocationKind.SavedMessages)
+    val selectedChannelKind: StateFlow<StorageLocationKind> = _selectedChannelKind.asStateFlow()
+
+    private val _chats = MutableStateFlow<List<StorageLocationOption>>(emptyList())
+    val chats: StateFlow<List<StorageLocationOption>> = _chats.asStateFlow()
 
     private val _isSearchLoading = MutableStateFlow(false)
     val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
+
+    init {
+        refreshSelectedChannel()
+    }
+
+    fun refreshSelectedChannel() {
+        val selectedChatId = securePrefs.getStorageChannelId()
+        if (selectedChatId == null) {
+            _selectedChannelName.value = "Saved Messages"
+            _selectedChannelKind.value = StorageLocationKind.SavedMessages
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                telegramClient.send(TdApi.GetChat(selectedChatId))
+            }.getOrNull()
+                ?.let { chatObj ->
+                    if (chatObj is TdApi.Chat) {
+                        val selectedChat = chatObj.toStorageLocationOption()
+                        _selectedChannelName.value = selectedChat.title
+                        _selectedChannelKind.value = selectedChat.kind
+                    }
+                }
+        }
+    }
 
     fun loadChats(query: String = "") {
         viewModelScope.launch {
@@ -52,16 +75,21 @@ class StorageSelectionViewModel @Inject constructor(
                 val loadedChats = chatIds.mapNotNull { id ->
                     val chatObj = telegramClient.send(TdApi.GetChat(id))
                     if (chatObj is TdApi.Chat) {
-                        val isChannel = chatObj.type is TdApi.ChatTypeSupergroup && (chatObj.type as TdApi.ChatTypeSupergroup).isChannel
-                        SelectableChat(id = chatObj.id, title = chatObj.title, isChannel = isChannel)
+                        chatObj.toStorageLocationOption()
                     } else null
                 }.filter {
                     query.isEmpty() || it.title.contains(query, ignoreCase = true)
                 }
 
-                val finalList = mutableListOf<SelectableChat>()
+                val finalList = mutableListOf<StorageLocationOption>()
                 if (query.isEmpty()) {
-                    finalList.add(SelectableChat(id = 0, title = "Saved Messages", isChannel = false))
+                    finalList.add(
+                        StorageLocationOption(
+                            id = 0,
+                            title = "Saved Messages",
+                            kind = StorageLocationKind.SavedMessages
+                        )
+                    )
                 }
                 finalList.addAll(loadedChats)
 
@@ -75,15 +103,17 @@ class StorageSelectionViewModel @Inject constructor(
         }
     }
 
-    fun selectChannel(id: Long, title: String) {
+    fun selectChannel(id: Long, title: String, kind: StorageLocationKind) {
         if (id == 0L) {
             securePrefs.setStorageChannelId(null)
             securePrefs.setStorageChannelName(null)
             _selectedChannelName.value = "Saved Messages"
+            _selectedChannelKind.value = StorageLocationKind.SavedMessages
         } else {
             securePrefs.setStorageChannelId(id)
             securePrefs.setStorageChannelName(title)
             _selectedChannelName.value = title
+            _selectedChannelKind.value = kind
         }
     }
 }

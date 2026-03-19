@@ -14,12 +14,9 @@ import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import javax.crypto.Cipher
-
-data class TelegramChat(
-    val id: Long,
-    val title: String,
-    val isChannel: Boolean
-)
+import com.sinxn.teledrive.ui.screens.storageselection.StorageLocationKind
+import com.sinxn.teledrive.ui.screens.storageselection.StorageLocationOption
+import com.sinxn.teledrive.ui.screens.storageselection.toStorageLocationOption
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -34,8 +31,11 @@ class SettingsViewModel @Inject constructor(
     )
     val selectedChannelName: StateFlow<String> = _selectedChannelName.asStateFlow()
 
-    private val _chats = MutableStateFlow<List<TelegramChat>>(emptyList())
-    val chats: StateFlow<List<TelegramChat>> = _chats.asStateFlow()
+    private val _selectedChannelKind = MutableStateFlow(StorageLocationKind.SavedMessages)
+    val selectedChannelKind: StateFlow<StorageLocationKind> = _selectedChannelKind.asStateFlow()
+
+    private val _chats = MutableStateFlow<List<StorageLocationOption>>(emptyList())
+    val chats: StateFlow<List<StorageLocationOption>> = _chats.asStateFlow()
 
     private val _isSearchLoading = MutableStateFlow(false)
     val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
@@ -47,6 +47,32 @@ class SettingsViewModel @Inject constructor(
         securePrefs.isBiometricUnlockEnabled() && securePrefs.getBiometricUnlockSecret() != null
     )
     val biometricUnlock: StateFlow<Boolean> = _biometricUnlock.asStateFlow()
+
+    init {
+        refreshStorageSelection()
+    }
+
+    fun refreshStorageSelection() {
+        val selectedChatId = securePrefs.getStorageChannelId()
+        if (selectedChatId == null) {
+            _selectedChannelName.value = "Saved Messages"
+            _selectedChannelKind.value = StorageLocationKind.SavedMessages
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                telegramClient.send(TdApi.GetChat(selectedChatId))
+            }.getOrNull()
+                ?.let { chatObj ->
+                    if (chatObj is TdApi.Chat) {
+                        val selectedChat = chatObj.toStorageLocationOption()
+                        _selectedChannelName.value = selectedChat.title
+                        _selectedChannelKind.value = selectedChat.kind
+                    }
+                }
+        }
+    }
 
     fun loadChats(query: String = "") {
         viewModelScope.launch {
@@ -66,16 +92,21 @@ class SettingsViewModel @Inject constructor(
                 val loadedChats = chatIds.mapNotNull { id ->
                     val chatObj = telegramClient.send(TdApi.GetChat(id))
                     if (chatObj is TdApi.Chat) {
-                        val isChannel = chatObj.type is TdApi.ChatTypeSupergroup && (chatObj.type as TdApi.ChatTypeSupergroup).isChannel
-                        TelegramChat(id = chatObj.id, title = chatObj.title, isChannel = isChannel)
+                        chatObj.toStorageLocationOption()
                     } else null
                 }.filter { 
                     query.isEmpty() || it.title.contains(query, ignoreCase = true)
                 }
                 
-                val finalList = mutableListOf<TelegramChat>()
+                val finalList = mutableListOf<StorageLocationOption>()
                 if (query.isEmpty()) {
-                    finalList.add(TelegramChat(id = 0, title = "Saved Messages", isChannel = false))
+                    finalList.add(
+                        StorageLocationOption(
+                            id = 0,
+                            title = "Saved Messages",
+                            kind = StorageLocationKind.SavedMessages
+                        )
+                    )
                 }
                 finalList.addAll(loadedChats)
                 
@@ -89,15 +120,17 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun selectChannel(id: Long, title: String) {
+    fun selectChannel(id: Long, title: String, kind: StorageLocationKind) {
         if (id == 0L) {
             securePrefs.setStorageChannelId(null)
             securePrefs.setStorageChannelName(null)
             _selectedChannelName.value = "Saved Messages"
+            _selectedChannelKind.value = StorageLocationKind.SavedMessages
         } else {
             securePrefs.setStorageChannelId(id)
             securePrefs.setStorageChannelName(title)
             _selectedChannelName.value = title
+            _selectedChannelKind.value = kind
         }
     }
 

@@ -7,7 +7,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SettingsBackupRestore
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.sinxn.teledrive.ui.screens.storageselection.icon
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -29,11 +29,16 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val selectedChannelName by viewModel.selectedChannelName.collectAsState()
+    val selectedChannelKind by viewModel.selectedChannelKind.collectAsState()
     val authOnLaunch by viewModel.authOnLaunch.collectAsState()
     val biometricUnlock by viewModel.biometricUnlock.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshStorageSelection()
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -57,7 +62,7 @@ fun SettingsScreen(
                 headlineContent = { Text("Storage Location") },
                 supportingContent = { Text(selectedChannelName) },
                 leadingContent = {
-                    Icon(androidx.compose.material.icons.Icons.Default.Storage, contentDescription = "Storage Location")
+                    Icon(selectedChannelKind.icon(), contentDescription = "Storage Location")
                 },
                 modifier = Modifier.clickable {
                     onNavigateToStorageSelection()
