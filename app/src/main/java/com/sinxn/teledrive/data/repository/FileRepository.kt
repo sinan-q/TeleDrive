@@ -3,6 +3,7 @@ package com.sinxn.teledrive.data.repository
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.model.SyncStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -10,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
  * Abstracts Room DAO + future TDLib remote data source.
  */
 interface FileRepository {
+
+    val downloadEvents: SharedFlow<DownloadEvent>
 
     /** Observe files within a folder (null parentId = root). */
     fun getFilesByParent(parentId: String?, userId: String): Flow<List<FileEntity>>
@@ -68,4 +71,9 @@ interface FileRepository {
      * Observable flow of the current sync status.
      */
     val syncStatus: StateFlow<SyncStatus>
+}
+
+sealed interface DownloadEvent {
+    data class Success(val fileName: String) : DownloadEvent
+    data class Failure(val fileName: String, val reason: String) : DownloadEvent
 }

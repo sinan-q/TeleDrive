@@ -13,7 +13,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
@@ -40,13 +42,16 @@ class FileRepositoryImpl @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Track file IDs that we explicitly asked TDLib to download this session */
-    private val pendingDownloads = mutableSetOf<Int>()
+    private val pendingDownloads = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
     /** Maps a pending upload's raw file name back to its target folder's parentId */
     private val pendingUploadParents = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     override val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+
+    private val _downloadEvents = MutableSharedFlow<DownloadEvent>(extraBufferCapacity = 16)
+    override val downloadEvents: SharedFlow<DownloadEvent> = _downloadEvents
 
     /**
      * Maps an encrypted TG filename (e.g. "report.pdf.enc") back to its original metadata
@@ -70,39 +75,7 @@ class FileRepositoryImpl @Inject constructor(
                             fileDao.updateUploadProgress(file.id.toString(), 1.0f)
                         }
 
-                        // Download logic - export only if we explicitly requested this download
-                        if (file.local.isDownloadingCompleted && file.local.path.isNotEmpty()
-                            && pendingDownloads.remove(file.id)) {
-                            try {
-                                val fileEntity = fileDao.getFileByFileId(file.id.toString())
-                                if (fileEntity != null) {
-                                    val downloadedFile = java.io.File(file.local.path)
-                                    val exportName = fileEntity.name
-                                    val exportMimeType = fileEntity.mimeType ?: "application/octet-stream"
-
-                                    // Check if the TDLib file is encrypted
-                                    if (downloadedFile.name.endsWith(".enc")) {
-                                        // Decrypt to a temp file, then export the plaintext
-                                        val decryptedFile = java.io.File(context.cacheDir, "dec_$exportName")
-                                        try {
-                                            fileCryptor.decryptFile(downloadedFile, decryptedFile)
-                                            com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
-                                                context, decryptedFile, exportName, exportMimeType
-                                            )
-                                        } finally {
-                                            decryptedFile.delete() // Always clean up temp decrypted file
-                                        }
-                                    } else {
-                                        // Legacy unencrypted file — export directly
-                                        com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
-                                            context, downloadedFile, exportName, exportMimeType
-                                        )
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.e("FileRepositoryImpl", "Failed to export/decrypt downloaded file", e)
-                            }
-                        }
+                        handleCompletedDownload(file)
                     }
                     is TdApi.UpdateNewMessage -> {
                         val activeUserId = securePrefs.getUserId()
@@ -316,8 +289,16 @@ class FileRepositoryImpl @Inject constructor(
     }
 
     override suspend fun downloadFile(file: FileEntity) {
-        val fileIdStr = file.fileId ?: return
-        val fileId = fileIdStr.toIntOrNull() ?: return
+        val fileIdStr = file.fileId
+        if (fileIdStr.isNullOrBlank()) {
+            _downloadEvents.emit(DownloadEvent.Failure(file.name, "Missing Telegram file ID"))
+            return
+        }
+        val fileId = fileIdStr.toIntOrNull()
+        if (fileId == null) {
+            _downloadEvents.emit(DownloadEvent.Failure(file.name, "Invalid Telegram file ID"))
+            return
+        }
         
         // Track this as an intentional download
         pendingDownloads.add(fileId)
@@ -328,9 +309,70 @@ class FileRepositoryImpl @Inject constructor(
              if (result is TdApi.Error) {
                  pendingDownloads.remove(fileId)
                  Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
+                 _downloadEvents.tryEmit(
+                     DownloadEvent.Failure(file.name, result.message ?: "Failed to start download")
+                 )
+             } else if (result is TdApi.File) {
+                 Log.d("FileRepositoryImpl", "Download request returned file state for ${file.name}")
+                 handleCompletedDownload(result)
              } else {
                  Log.d("FileRepositoryImpl", "Download queued to TDLib!")
              }
+        }
+    }
+
+    private fun handleCompletedDownload(file: TdApi.File) {
+        if (!file.local.isDownloadingCompleted || file.local.path.isEmpty()) {
+            return
+        }
+        if (!pendingDownloads.remove(file.id)) {
+            return
+        }
+
+        scope.launch {
+            val fileEntity = fileDao.getFileByFileId(file.id.toString())
+            if (fileEntity == null) {
+                Log.e("FileRepositoryImpl", "Downloaded file ${file.id} is not present in Room")
+                _downloadEvents.emit(
+                    DownloadEvent.Failure("Unknown file", "Downloaded file metadata was not found")
+                )
+                return@launch
+            }
+
+            try {
+                val downloadedFile = java.io.File(file.local.path)
+                val exportName = fileEntity.cleanExportName()
+                val exportMimeType = fileEntity.mimeType ?: "application/octet-stream"
+
+                val exported = if (downloadedFile.name.endsWith(".enc")) {
+                    val decryptedFile = java.io.File(context.cacheDir, "dec_$exportName")
+                    try {
+                        fileCryptor.decryptFile(downloadedFile, decryptedFile)
+                        com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
+                            context, decryptedFile, exportName, exportMimeType
+                        )
+                    } finally {
+                        decryptedFile.delete()
+                    }
+                } else {
+                    com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
+                        context, downloadedFile, exportName, exportMimeType
+                    )
+                }
+
+                if (exported) {
+                    _downloadEvents.emit(DownloadEvent.Success(exportName))
+                } else {
+                    _downloadEvents.emit(
+                        DownloadEvent.Failure(exportName, "Could not write file to Downloads/TeleDrive")
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Failed to export/decrypt downloaded file", e)
+                _downloadEvents.emit(
+                    DownloadEvent.Failure(fileEntity.name, e.message ?: "Failed to process downloaded file")
+                )
+            }
         }
     }
 
@@ -419,5 +461,17 @@ class FileRepositoryImpl @Inject constructor(
      */
     private fun FileEntity.localName(): String {
         return if (this.name.endsWith(".enc")) this.name else "${this.name}.enc"
+    }
+
+    private fun FileEntity.cleanExportName(): String {
+        val suffix = ".enc"
+        if (!this.originalFileName.isNullOrBlank()) {
+            return this.originalFileName
+        }
+        return if (this.name.length >= suffix.length && this.name.lowercase().endsWith(suffix)) {
+            this.name.substring(0, this.name.length - suffix.length)
+        } else {
+            this.name
+        }
     }
 }

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.entity.UserEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.repository.DownloadEvent
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
@@ -95,6 +96,18 @@ class HomeViewModel @Inject constructor(
     val snackbarEvents: SharedFlow<String> = _snackbarEvents.asSharedFlow()
 
     init {
+        viewModelScope.launch {
+            fileRepository.downloadEvents.collect { event ->
+                when (event) {
+                    is DownloadEvent.Success -> {
+                        _snackbarEvents.emit("Saved \"${event.fileName}\" to Downloads/TeleDrive")
+                    }
+                    is DownloadEvent.Failure -> {
+                        _snackbarEvents.emit("Download failed for \"${event.fileName}\": ${event.reason}")
+                    }
+                }
+            }
+        }
         loadFiles()
     }
 
