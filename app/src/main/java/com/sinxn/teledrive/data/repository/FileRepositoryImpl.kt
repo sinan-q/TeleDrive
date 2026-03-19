@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,10 +41,6 @@ class FileRepositoryImpl @Inject constructor(
     private val securePrefs: SecurePrefs,
     private val fileCryptor: FileCryptor
 ) : FileRepository {
-
-    companion object {
-        private const val MULTIPART_CHUNK_SIZE_BYTES = 64L * 1024L * 1024L
-    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -253,48 +250,27 @@ class FileRepositoryImpl @Inject constructor(
             }
 
     override suspend fun uploadFile(uri: Uri, userId: String, parentId: String?): String {
-        try {
-            val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, uri)
-            val originalName = pickedFile.displayName
-            val targetChatId = resolveTargetChatId(userId)
-            val totalParts = pickedFile.sizeBytes
-                ?.takeIf { it > MULTIPART_CHUNK_SIZE_BYTES }
-                ?.let { ((it + MULTIPART_CHUNK_SIZE_BYTES - 1) / MULTIPART_CHUNK_SIZE_BYTES).toInt() }
-                ?: 1
+        return withContext(Dispatchers.IO) {
+            try {
+                val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, uri)
+                val originalName = pickedFile.displayName
+                val targetChatId = resolveTargetChatId(userId)
 
-            context.contentResolver.openInputStream(uri)?.use { sourceStream ->
-                if (totalParts == 1) {
-                    uploadEncryptedPart(
+                context.contentResolver.openInputStream(uri)?.use { sourceStream ->
+                    uploadEncryptedContainer(
                         sourceStream = sourceStream,
-                        userId = userId,
                         chatId = targetChatId,
                         encryptedFileName = "$originalName.enc",
                         storedDisplayName = originalName,
                         mimeType = pickedFile.mimeType,
                         parentId = parentId
                     )
-                } else {
-                    for (partIndex in 1..totalParts) {
-                        val chunkName = "$originalName.part$partIndex"
-                        val bytesRead = uploadEncryptedPart(
-                            sourceStream = LimitedInputStream(sourceStream, MULTIPART_CHUNK_SIZE_BYTES),
-                            userId = userId,
-                            chatId = targetChatId,
-                            encryptedFileName = "$chunkName.enc",
-                            storedDisplayName = chunkName,
-                            mimeType = pickedFile.mimeType,
-                            parentId = parentId
-                        )
-                        if (bytesRead <= 0L) {
-                            break
-                        }
-                    }
-                }
-            } ?: error("Could not open selected file")
-            return originalName
-        } catch (e: Exception) {
-            Log.e("FileRepositoryImpl", "Error initiating encrypted file upload", e)
-            throw e
+                } ?: error("Could not open selected file")
+                originalName
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Error initiating encrypted file upload", e)
+                throw e
+            }
         }
     }
 
@@ -589,9 +565,8 @@ class FileRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun uploadEncryptedPart(
+    private suspend fun uploadEncryptedContainer(
         sourceStream: java.io.InputStream,
-        userId: String,
         chatId: Long,
         encryptedFileName: String,
         storedDisplayName: String,
@@ -646,27 +621,5 @@ class FileRepositoryImpl @Inject constructor(
             }
         }
         return bytesRead
-    }
-
-    private class LimitedInputStream(
-        private val upstream: java.io.InputStream,
-        private val maxBytes: Long
-    ) : java.io.InputStream() {
-        private var bytesRead = 0L
-
-        override fun read(): Int {
-            if (bytesRead >= maxBytes) return -1
-            val value = upstream.read()
-            if (value != -1) bytesRead++
-            return value
-        }
-
-        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-            if (bytesRead >= maxBytes) return -1
-            val allowed = minOf(length.toLong(), maxBytes - bytesRead).toInt()
-            val read = upstream.read(buffer, offset, allowed)
-            if (read > 0) bytesRead += read.toLong()
-            return read
-        }
     }
 }

@@ -3,12 +3,14 @@ package com.sinxn.teledrive.data.crypto
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.PushbackInputStream
 import java.io.InputStream
-import java.io.OutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.EOFException
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
-import javax.crypto.CipherOutputStream
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -58,10 +60,13 @@ class FileCryptor @Inject constructor(
         private const val AES_ALGORITHM = "AES/GCM/NoPadding"
         private const val GCM_TAG_LENGTH_BITS = 128
         private const val GCM_IV_LENGTH_BYTES = 12
+        private const val GCM_IV_PREFIX_BYTES = 8
         private const val SALT_LENGTH_BYTES = 16
         private const val PBKDF2_ITERATIONS = 100_000
         private const val KEY_LENGTH_BITS = 256
         private const val PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA256"
+        private val CHUNKED_MAGIC = byteArrayOf('T'.code.toByte(), 'D'.code.toByte(), 'C'.code.toByte(), '2'.code.toByte())
+        private const val CHUNK_PLAINTEXT_SIZE_BYTES = 4 * 1024 * 1024
 
         /** Size of the fixed header prepended to every .enc file */
         const val HEADER_SIZE = SALT_LENGTH_BYTES + GCM_IV_LENGTH_BYTES  // 28 bytes
@@ -89,27 +94,38 @@ class FileCryptor @Inject constructor(
     fun encryptStream(inputStream: InputStream, outputFile: File): Long {
         val password = encryptionManager.getSessionPassword()
 
-        // Generate fresh per-file salt and IV
         val random = SecureRandom()
         val salt = ByteArray(SALT_LENGTH_BYTES).also { random.nextBytes(it) }
-        val iv = ByteArray(GCM_IV_LENGTH_BYTES).also { random.nextBytes(it) }
+        val ivPrefix = ByteArray(GCM_IV_PREFIX_BYTES).also { random.nextBytes(it) }
 
-        // Derive a per-file AES key from the raw password + per-file salt
         val perFileKey = derivePerFileKey(password, salt)
         val secretKey = SecretKeySpec(perFileKey, "AES")
 
-        val cipher = Cipher.getInstance(AES_ALGORITHM)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
-
         var bytesReadTotal = 0L
-        FileOutputStream(outputFile).use { fos ->
-            // Write the fixed header: Salt + IV
-            fos.write(salt)
-            fos.write(iv)
+        DataOutputStream(FileOutputStream(outputFile).buffered()).use { output ->
+            output.write(CHUNKED_MAGIC)
+            output.write(salt)
+            output.write(ivPrefix)
+            output.writeInt(CHUNK_PLAINTEXT_SIZE_BYTES)
 
-            // Stream the plaintext through the cipher into the output
-            CipherOutputStream(fos, cipher).use { cos ->
-                bytesReadTotal = inputStream.copyTo(cos, bufferSize = 8192)
+            val buffer = ByteArray(CHUNK_PLAINTEXT_SIZE_BYTES)
+            var chunkIndex = 0
+            while (true) {
+                val bytesRead = inputStream.readChunk(buffer)
+                if (bytesRead <= 0) break
+
+                val cipher = Cipher.getInstance(AES_ALGORITHM)
+                cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    secretKey,
+                    GCMParameterSpec(GCM_TAG_LENGTH_BITS, buildChunkIv(ivPrefix, chunkIndex))
+                )
+
+                val ciphertext = cipher.doFinal(buffer, 0, bytesRead)
+                output.writeInt(ciphertext.size)
+                output.write(ciphertext)
+                bytesReadTotal += bytesRead.toLong()
+                chunkIndex++
             }
         }
 
@@ -129,23 +145,17 @@ class FileCryptor @Inject constructor(
         val password = encryptionManager.getSessionPassword()
 
         FileInputStream(inputFile).use { fis ->
-            // Read the fixed header
-            val salt = ByteArray(SALT_LENGTH_BYTES)
-            val iv = ByteArray(GCM_IV_LENGTH_BYTES)
-            fis.readExactly(salt)
-            fis.readExactly(iv)
+            PushbackInputStream(fis, CHUNKED_MAGIC.size).use { input ->
+                val prefix = ByteArray(CHUNKED_MAGIC.size)
+                input.readExactly(prefix)
 
-            // Derive the per-file AES key
-            val perFileKey = derivePerFileKey(password, salt)
-            val secretKey = SecretKeySpec(perFileKey, "AES")
-
-            val cipher = Cipher.getInstance(AES_ALGORITHM)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
-
-            // Stream the ciphertext through the cipher into the output
-            FileOutputStream(outputFile).use { fos ->
-                CipherInputStream(fis, cipher).use { cis ->
-                    cis.copyTo(fos, bufferSize = 8192)
+                FileOutputStream(outputFile).buffered().use { output ->
+                    if (prefix.contentEquals(CHUNKED_MAGIC)) {
+                        decryptChunkedStream(input, output, password)
+                    } else {
+                        input.unread(prefix)
+                        decryptLegacyStream(input, output, password)
+                    }
                 }
             }
         }
@@ -216,6 +226,68 @@ class FileCryptor @Inject constructor(
         return factory.generateSecret(spec).encoded
     }
 
+    private fun decryptLegacyStream(inputStream: InputStream, outputStream: java.io.OutputStream, password: String) {
+        val salt = ByteArray(SALT_LENGTH_BYTES)
+        val iv = ByteArray(GCM_IV_LENGTH_BYTES)
+        inputStream.readExactly(salt)
+        inputStream.readExactly(iv)
+
+        val perFileKey = derivePerFileKey(password, salt)
+        val secretKey = SecretKeySpec(perFileKey, "AES")
+        val cipher = Cipher.getInstance(AES_ALGORITHM)
+        cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
+
+        CipherInputStream(inputStream, cipher).use { cis ->
+            cis.copyTo(outputStream, bufferSize = 8192)
+        }
+    }
+
+    private fun decryptChunkedStream(inputStream: InputStream, outputStream: java.io.OutputStream, password: String) {
+        val dataInput = DataInputStream(inputStream.buffered())
+        val salt = ByteArray(SALT_LENGTH_BYTES)
+        val ivPrefix = ByteArray(GCM_IV_PREFIX_BYTES)
+        dataInput.readFully(salt)
+        dataInput.readFully(ivPrefix)
+        val chunkSize = dataInput.readInt()
+        require(chunkSize > 0) { "Invalid encrypted file chunk size" }
+
+        val perFileKey = derivePerFileKey(password, salt)
+        val secretKey = SecretKeySpec(perFileKey, "AES")
+        var chunkIndex = 0
+
+        while (true) {
+            val ciphertextSize = try {
+                dataInput.readInt()
+            } catch (_: EOFException) {
+                break
+            }
+            require(ciphertextSize > 0) { "Invalid encrypted chunk size" }
+
+            val ciphertext = ByteArray(ciphertextSize)
+            dataInput.readFully(ciphertext)
+
+            val cipher = Cipher.getInstance(AES_ALGORITHM)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                secretKey,
+                GCMParameterSpec(GCM_TAG_LENGTH_BITS, buildChunkIv(ivPrefix, chunkIndex))
+            )
+
+            val plaintext = cipher.doFinal(ciphertext)
+            outputStream.write(plaintext)
+            chunkIndex++
+        }
+    }
+
+    private fun buildChunkIv(prefix: ByteArray, chunkIndex: Int): ByteArray {
+        return prefix + byteArrayOf(
+            (chunkIndex ushr 24).toByte(),
+            (chunkIndex ushr 16).toByte(),
+            (chunkIndex ushr 8).toByte(),
+            chunkIndex.toByte()
+        )
+    }
+
     /**
      * Extension to read exactly N bytes from an InputStream, throwing if EOF is reached early.
      */
@@ -226,5 +298,15 @@ class FileCryptor @Inject constructor(
             if (bytesRead == -1) throw java.io.EOFException("Unexpected end of encrypted file")
             offset += bytesRead
         }
+    }
+
+    private fun InputStream.readChunk(buffer: ByteArray): Int {
+        var total = 0
+        while (total < buffer.size) {
+            val read = read(buffer, total, buffer.size - total)
+            if (read == -1) break
+            total += read
+        }
+        return total
     }
 }
