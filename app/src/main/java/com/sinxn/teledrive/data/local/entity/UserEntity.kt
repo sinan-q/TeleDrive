@@ -22,6 +22,12 @@ data class UserEntity(
 
     val phone: String? = null,
 
+    @ColumnInfo(name = "photo_file_id")
+    val photoFileId: Int? = null,
+
+    @ColumnInfo(name = "photo_path")
+    val photoPath: String? = null,
+
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),
 

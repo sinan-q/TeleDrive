@@ -3,6 +3,7 @@ package com.sinxn.teledrive.di
 import android.content.Context
 import androidx.room.Room
 import com.sinxn.teledrive.data.local.AppDatabase
+import com.sinxn.teledrive.data.local.MIGRATION_3_4
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.dao.UserDao
 import dagger.Module
@@ -24,6 +25,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "teledrive.db"
         )
+            .addMigrations(MIGRATION_3_4)
             .fallbackToDestructiveMigration()
             .build()
     }

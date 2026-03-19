@@ -131,6 +131,12 @@ fun TeleDriveNavHost(
                 },
                 onNavigateToBackup = {
                     navController.navigate(Route.Backup)
+                },
+                onLogout = {
+                    navController.navigate(Route.Login) {
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 }
             )
         }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.sinxn.teledrive.data.model.SyncStatus
@@ -220,6 +221,16 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun getStorageUsed(userId: String): Long =
         fileDao.getStorageUsed(userId)
+
+    override fun observeFileFolderCounts(userId: String): Flow<FileFolderSummary> =
+        fileDao.observeFileFolderCounts(userId)
+            .filterNotNull()
+            .map { counts ->
+                FileFolderSummary(
+                    fileCount = counts.fileCount,
+                    folderCount = counts.folderCount
+                )
+            }
 
     override suspend fun uploadFile(filePath: String, userId: String, parentId: String?) {
         try {

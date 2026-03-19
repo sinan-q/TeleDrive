@@ -4,12 +4,18 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FileDao {
+
+    data class FileFolderCounts(
+        val fileCount: Int,
+        val folderCount: Int
+    )
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertFile(file: FileEntity)
@@ -79,6 +85,16 @@ interface FileDao {
     /** Get total storage used by a user (sum of file sizes) */
     @Query("SELECT COALESCE(SUM(size), 0) FROM files WHERE user_id = :userId AND deleted_at IS NULL AND type = 'file'")
     suspend fun getStorageUsed(userId: String): Long
+
+    @Transaction
+    @Query("""
+        SELECT
+            SUM(CASE WHEN type = 'file' THEN 1 ELSE 0 END) AS fileCount,
+            SUM(CASE WHEN type = 'folder' THEN 1 ELSE 0 END) AS folderCount
+        FROM files
+        WHERE user_id = :userId AND deleted_at IS NULL
+    """)
+    fun observeFileFolderCounts(userId: String): Flow<FileFolderCounts?>
 
     /** Hard-delete all files for a user (used during logout) */
     @Query("DELETE FROM files WHERE user_id = :userId")

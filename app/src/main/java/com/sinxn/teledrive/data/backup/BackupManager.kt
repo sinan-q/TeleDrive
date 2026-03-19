@@ -57,7 +57,7 @@ class BackupManager @Inject constructor(
             userDao.deleteAllUsers()
 
             if (backup.users.isNotEmpty()) {
-                userDao.insertUsers(backup.users.map(BackupUser::toEntity))
+                userDao.upsertUsers(backup.users.map(BackupUser::toEntity))
             }
             if (backup.files.isNotEmpty()) {
                 fileDao.insertFiles(backup.files.map(BackupFile::toEntity))

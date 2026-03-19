@@ -21,7 +21,7 @@ class UserRepositoryImpl @Inject constructor(
         userDao.getCurrentUserSync()
 
     override suspend fun saveUser(user: UserEntity) =
-        userDao.insertUser(user)
+        userDao.upsertUser(user)
 
     override suspend fun clearUser() =
         userDao.deleteAllUsers()

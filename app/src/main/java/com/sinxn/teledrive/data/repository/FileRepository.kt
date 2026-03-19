@@ -40,6 +40,9 @@ interface FileRepository {
 
     /** Get total storage used by a user (sum of file sizes in bytes). */
     suspend fun getStorageUsed(userId: String): Long
+
+    /** Observe local cached file/folder counts for a user. */
+    fun observeFileFolderCounts(userId: String): Flow<FileFolderSummary>
     
     /**
      * Uploads a physical file on the device to a specified chat (e.g. Saved Messages).
@@ -77,3 +80,8 @@ sealed interface DownloadEvent {
     data class Success(val fileName: String) : DownloadEvent
     data class Failure(val fileName: String, val reason: String) : DownloadEvent
 }
+
+data class FileFolderSummary(
+    val fileCount: Int = 0,
+    val folderCount: Int = 0
+)

@@ -283,13 +283,22 @@ class AuthManager @Inject constructor(
                         tgId = userId,
                         username = me.usernames?.activeUsernames?.firstOrNull().orEmpty(),
                         name = "${me.firstName} ${me.lastName}".trim(),
-                        phone = me.phoneNumber
+                        phone = me.phoneNumber,
+                        photoFileId = me.profilePhoto?.small?.id,
+                        photoPath = me.profilePhoto?.small?.local
+                            ?.takeIf { it.isDownloadingCompleted && it.path.isNotEmpty() }
+                            ?.path
                     )
                 )
+                me.profilePhoto?.small?.id?.let(::requestProfilePhoto)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to sync authenticated user", e)
             }
         }
+    }
+
+    private fun requestProfilePhoto(fileId: Int) {
+        telegramClient.sendAsync(TdApi.DownloadFile(fileId, 1, 0, 0, false)) { }
     }
 
     private fun clearCachedUser() {

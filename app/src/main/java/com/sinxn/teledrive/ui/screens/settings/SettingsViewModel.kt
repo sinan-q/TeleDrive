@@ -4,12 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
 import com.sinxn.teledrive.data.crypto.EncryptionManager
+import com.sinxn.teledrive.data.local.entity.UserEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.repository.FileFolderSummary
+import com.sinxn.teledrive.data.repository.FileRepository
+import com.sinxn.teledrive.data.repository.UserRepository
+import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
@@ -23,8 +30,13 @@ class SettingsViewModel @Inject constructor(
     private val securePrefs: SecurePrefs,
     private val telegramClient: TelegramClient,
     private val encryptionManager: EncryptionManager,
-    private val biometricPasswordStore: BiometricPasswordStore
+    private val biometricPasswordStore: BiometricPasswordStore,
+    private val fileRepository: FileRepository,
+    private val userRepository: UserRepository,
+    private val authManager: AuthManager
 ) : ViewModel() {
+    private var fileFolderSummaryJob: Job? = null
+
 
     private val _selectedChannelName = MutableStateFlow(
         securePrefs.getStorageChannelName() ?: "Saved Messages"
@@ -48,8 +60,36 @@ class SettingsViewModel @Inject constructor(
     )
     val biometricUnlock: StateFlow<Boolean> = _biometricUnlock.asStateFlow()
 
+    private val _currentUser = MutableStateFlow<UserEntity?>(null)
+    val currentUser: StateFlow<UserEntity?> = _currentUser.asStateFlow()
+
+    private val _fileFolderSummary = MutableStateFlow(FileFolderSummary())
+    val fileFolderSummary: StateFlow<FileFolderSummary> = _fileFolderSummary.asStateFlow()
+
     init {
         refreshStorageSelection()
+        viewModelScope.launch {
+            userRepository.getCurrentUser().collectLatest { user ->
+                _currentUser.value = user
+                user?.photoFileId?.let { fileId ->
+                    if (user.photoPath.isNullOrBlank()) {
+                        requestProfilePhoto(fileId)
+                    }
+                }
+                if (user == null) {
+                    fileFolderSummaryJob?.cancel()
+                    _fileFolderSummary.value = FileFolderSummary()
+                } else {
+                    fileFolderSummaryJob?.cancel()
+                    fileFolderSummaryJob = launch {
+                        fileRepository.observeFileFolderCounts(user.id).collectLatest { summary ->
+                            _fileFolderSummary.value = summary
+                        }
+                    }
+                }
+            }
+        }
+        observeProfilePhotoUpdates()
     }
 
     fun refreshStorageSelection() {
@@ -170,5 +210,40 @@ class SettingsViewModel @Inject constructor(
         securePrefs.clearBiometricUnlockSecret()
         securePrefs.setBiometricUnlock(false)
         _biometricUnlock.value = false
+    }
+
+    fun logout() {
+        disableBiometricUnlock()
+        securePrefs.clearAutoUnlockSecret()
+        securePrefs.clearMasterPassword()
+        securePrefs.setAuthOnLaunch(false)
+        _authOnLaunch.value = false
+        securePrefs.setStorageChannelId(null)
+        securePrefs.setStorageChannelName(null)
+        _selectedChannelName.value = "Saved Messages"
+        _selectedChannelKind.value = StorageLocationKind.SavedMessages
+        authManager.logout()
+    }
+
+    private fun observeProfilePhotoUpdates() {
+        viewModelScope.launch {
+            telegramClient.updates.collectLatest { update ->
+                if (update !is TdApi.UpdateFile) return@collectLatest
+
+                val local = update.file.local
+                if (!local.isDownloadingCompleted || local.path.isEmpty()) return@collectLatest
+
+                val user = _currentUser.value ?: return@collectLatest
+                if (user.photoFileId != update.file.id || user.photoPath == local.path) return@collectLatest
+
+                val updatedUser = user.copy(photoPath = local.path)
+                _currentUser.value = updatedUser
+                userRepository.saveUser(updatedUser)
+            }
+        }
+    }
+
+    private fun requestProfilePhoto(fileId: Int) {
+        telegramClient.sendAsync(TdApi.DownloadFile(fileId, 1, 0, 0, false)) { }
     }
 }

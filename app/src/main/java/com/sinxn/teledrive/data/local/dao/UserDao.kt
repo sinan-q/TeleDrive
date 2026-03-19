@@ -4,17 +4,18 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import com.sinxn.teledrive.data.local.entity.UserEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDao {
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertUser(user: UserEntity)
+    @Upsert
+    suspend fun upsertUser(user: UserEntity)
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertUsers(users: List<UserEntity>)
+    @Upsert
+    suspend fun upsertUsers(users: List<UserEntity>)
 
     @Query("SELECT * FROM users LIMIT 1")
     fun getCurrentUser(): Flow<UserEntity?>
