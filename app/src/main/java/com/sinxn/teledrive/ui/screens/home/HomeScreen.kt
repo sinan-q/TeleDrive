@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.List
@@ -21,7 +23,6 @@ import com.sinxn.teledrive.ui.screens.home.components.EmptyStateView
 import com.sinxn.teledrive.ui.screens.home.components.ErrorStateView
 import com.sinxn.teledrive.ui.screens.home.components.FileListView
 import com.sinxn.teledrive.ui.screens.home.components.FileGridView
-import com.sinxn.teledrive.ui.screens.home.components.MoveToFolderDialog
 import com.sinxn.teledrive.ui.screens.home.components.RenameDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,8 +68,8 @@ fun HomeScreen(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var fileToRename by remember { mutableStateOf<FileEntity?>(null) }
     var fileToMove by remember { mutableStateOf<FileEntity?>(null) }
-    val folders by viewModel.folders.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val currentFolderId = breadcrumbs.lastOrNull()?.id
 
     // Collect one-shot snackbar events
     LaunchedEffect(Unit) {
@@ -90,6 +91,21 @@ fun HomeScreen(
                 TopAppBar(
                     title = { Text("TeleDrive") },
                     actions = {
+                        if (fileToMove != null) {
+                            IconButton(
+                                onClick = {
+                                    fileToMove?.let { file ->
+                                        viewModel.moveFile(file.id, currentFolderId)
+                                        fileToMove = null
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste")
+                            }
+                            IconButton(onClick = { fileToMove = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Move")
+                            }
+                        }
                         IconButton(onClick = { showCreateFolderDialog = true }) {
                             Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
                         }
@@ -138,7 +154,9 @@ fun HomeScreen(
                     )
                 }
                 is HomeUiState.Success -> {
-                    if (state.files.isEmpty()) {
+                    val visibleFiles = state.files.filterNot { it.id == fileToMove?.id }
+
+                    if (visibleFiles.isEmpty()) {
                         EmptyStateView(
                             modifier = Modifier.align(Alignment.Center).padding(32.dp)
                         )
@@ -146,7 +164,7 @@ fun HomeScreen(
                         AnimatedContent(targetState = isGridView, label = "view_toggle") { gridMode ->
                             if (gridMode) {
                                 FileGridView(
-                                    files = state.files,
+                                    files = visibleFiles,
                                     onFileClick = { file ->
                                         if (file.type == "folder") {
                                             viewModel.navigateToFolder(file)
@@ -164,13 +182,12 @@ fun HomeScreen(
                                         fileToRename = file
                                     },
                                     onMoveClick = { file ->
-                                        viewModel.loadFolders()
                                         fileToMove = file
                                     }
                                 )
                             } else {
                                 FileListView(
-                                    files = state.files,
+                                    files = visibleFiles,
                                     onFileClick = { file ->
                                         if (file.type == "folder") {
                                             viewModel.navigateToFolder(file)
@@ -188,7 +205,6 @@ fun HomeScreen(
                                         fileToRename = file
                                     },
                                     onMoveClick = { file ->
-                                        viewModel.loadFolders()
                                         fileToMove = file
                                     }
                                 )
@@ -215,17 +231,6 @@ fun HomeScreen(
             onDismissRequest = { fileToRename = null },
             onRename = { newName ->
                 viewModel.renameFile(file.id, newName)
-            }
-        )
-    }
-
-    fileToMove?.let { file ->
-        MoveToFolderDialog(
-            folders = folders.filter { it.id != file.id },
-            currentParentId = file.parentId,
-            onDismissRequest = { fileToMove = null },
-            onMoveToFolder = { newParentId ->
-                viewModel.moveFile(file.id, newParentId)
             }
         )
     }

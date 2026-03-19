@@ -154,7 +154,7 @@ fun FileItem(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Move to...") },
+                            text = { Text("Move") },
                             onClick = {
                                 showMenu = false
                                 onMoveClick()
@@ -244,7 +244,7 @@ fun FileItem(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Move to...") },
+                        text = { Text("Move") },
                         onClick = {
                             showMenu = false
                             onMoveClick()
