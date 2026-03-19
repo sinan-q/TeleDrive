@@ -44,7 +44,7 @@ class FileRepositoryImpl @Inject constructor(
     /** Track file IDs that we explicitly asked TDLib to download this session */
     private val pendingDownloads = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
-    /** Maps a pending upload's raw file name back to its target folder's parentId */
+    /** Maps a pending upload's unique encrypted filename back to its target folder's parentId */
     private val pendingUploadParents = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
@@ -103,7 +103,7 @@ class FileRepositoryImpl @Inject constructor(
                                 } else entity // MessageMapper already strips .enc suffix
 
                                 // Re-attach parent folder mapping using the ORIGINAL name
-                                val parentId = pendingUploadParents.remove(cleanEntity.name)
+                                val parentId = pendingUploadParents.remove(entity.localName())
                                 val entityToInsert = if (parentId != null) {
                                     cleanEntity.copy(parentId = parentId)
                                 } else cleanEntity
@@ -119,7 +119,8 @@ class FileRepositoryImpl @Inject constructor(
                         
                         // Fetch the temporary record to preserve its folder context (parentId)
                         val oldEntity = fileDao.getFileById(oldId)
-                        val parentId = oldEntity?.parentId ?: pendingUploadParents.remove(oldEntity?.name ?: "")
+                        val uploadKey = update.message.toFileEntity(activeUserId)?.localName()
+                        val parentId = oldEntity?.parentId ?: uploadKey?.let(pendingUploadParents::remove)
                         
                         // Create the final entity with the permanent ID
                         val newEntity = update.message.toFileEntity(activeUserId, parentId)
@@ -225,15 +226,16 @@ class FileRepositoryImpl @Inject constructor(
             val originalFile = java.io.File(filePath)
             val originalName = originalFile.name
 
-            // Track the destination folder using the ORIGINAL filename
-            if (parentId != null) {
-                pendingUploadParents[originalName] = parentId
-            }
-
             // ── Encrypt the file ──────────────────────────────────────
-            val encFile = java.io.File(context.cacheDir, "$originalName.enc")
+            val uploadToken = java.util.UUID.randomUUID().toString()
+            val encryptedName = "${uploadToken}_$originalName.enc"
+            val encFile = java.io.File(context.cacheDir, encryptedName)
             fileCryptor.encryptFile(originalFile, encFile)
             Log.d("FileRepositoryImpl", "Encrypted $originalName -> ${encFile.name} (${encFile.length()} bytes)")
+
+            if (parentId != null) {
+                pendingUploadParents[encFile.name] = parentId
+            }
 
             // Map the encrypted TG name back to the original clean name
             val mimeType = android.webkit.MimeTypeMap.getSingleton()
@@ -272,7 +274,7 @@ class FileRepositoryImpl @Inject constructor(
 
             telegramClient.sendAsync(sendMessage) { result ->
                 if (result is TdApi.Error) {
-                    pendingUploadParents.remove(originalName)
+                    pendingUploadParents.remove(encFile.name)
                     pendingUploadMeta.remove(encFile.name)
                     encFile.delete()
                     Log.e("FileRepositoryImpl", "Failed to queue upload: ${result.message}")
