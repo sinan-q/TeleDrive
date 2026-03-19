@@ -27,6 +27,9 @@ sealed interface Route {
     data object Settings : Route
 
     @Serializable
+    data object Backup : Route
+
+    @Serializable
     data class SyncProgress(val isFromSettings: Boolean = false) : Route
 
     @Serializable

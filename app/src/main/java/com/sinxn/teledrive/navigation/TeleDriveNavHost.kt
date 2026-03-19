@@ -13,6 +13,7 @@ import com.sinxn.teledrive.ui.screens.login.LoginScreen
 import com.sinxn.teledrive.ui.screens.masterpassword.MasterPasswordScreen
 import com.sinxn.teledrive.ui.screens.settings.SettingsScreen
 import com.sinxn.teledrive.ui.screens.folder.FolderViewScreen
+import com.sinxn.teledrive.ui.screens.backup.BackupScreen
 import com.sinxn.teledrive.ui.screens.storageselection.StorageSelectionScreen
 import com.sinxn.teledrive.ui.screens.securitypreferences.SecurityPreferencesScreen
 import com.sinxn.teledrive.ui.screens.sync.SyncProgressScreen
@@ -127,7 +128,16 @@ fun TeleDriveNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToStorageSelection = {
                     navController.navigate(Route.StorageSelection(isFromSettings = true))
+                },
+                onNavigateToBackup = {
+                    navController.navigate(Route.Backup)
                 }
+            )
+        }
+
+        composable<Route.Backup> {
+            BackupScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 

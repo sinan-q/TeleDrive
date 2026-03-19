@@ -17,6 +17,9 @@ interface FileDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertFiles(files: List<FileEntity>)
 
+    @Query("SELECT * FROM files ORDER BY created_at ASC")
+    suspend fun getAllFiles(): List<FileEntity>
+
     @Update
     suspend fun updateFile(file: FileEntity)
 
@@ -80,4 +83,7 @@ interface FileDao {
     /** Hard-delete all files for a user (used during logout) */
     @Query("DELETE FROM files WHERE user_id = :userId")
     suspend fun deleteAllFilesForUser(userId: String)
+
+    @Query("DELETE FROM files")
+    suspend fun deleteAllFiles()
 }

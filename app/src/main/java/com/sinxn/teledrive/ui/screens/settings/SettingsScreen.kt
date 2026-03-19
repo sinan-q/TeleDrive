@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToStorageSelection: () -> Unit,
+    onNavigateToBackup: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -59,6 +61,19 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.clickable {
                     onNavigateToStorageSelection()
+                }
+            )
+
+            HorizontalDivider()
+
+            ListItem(
+                headlineContent = { Text("Backup & Restore") },
+                supportingContent = { Text("Export or restore your local TeleDrive metadata") },
+                leadingContent = {
+                    Icon(androidx.compose.material.icons.Icons.Default.SettingsBackupRestore, contentDescription = null)
+                },
+                modifier = Modifier.clickable {
+                    onNavigateToBackup()
                 }
             )
 
