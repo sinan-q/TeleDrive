@@ -5,14 +5,12 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.local.entity.FileEntity
-import com.sinxn.teledrive.data.local.entity.UserEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.DownloadEvent
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
-import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,7 +26,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
-import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import android.app.Application
 import com.sinxn.teledrive.utils.FileUtils
@@ -43,7 +40,6 @@ sealed class HomeUiState {
 class HomeViewModel @Inject constructor(
     private val fileRepository: FileRepository,
     private val userRepository: UserRepository,
-    private val telegramClient: TelegramClient,
     private val securePrefs: SecurePrefs,
     private val authManager: AuthManager,
     private val application: Application
@@ -139,24 +135,16 @@ class HomeViewModel @Inject constructor(
                     return@launch
                 }
 
-                val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
-                val fetchedUserId = me.id.toString()
-                
-                // Save the authenticated user to the local database to satisfy FileEntity FOREIGN KEY constraints
-                userRepository.saveUser(
-                    UserEntity(
-                        id = fetchedUserId,
-                        tgId = fetchedUserId,
-                        username = "", // Using empty safely
-                        name = "${me.firstName} ${me.lastName}".trim(),
-                        phone = me.phoneNumber
-                    )
-                )
-                
-                // If it's a new login or previous cache was empty, save it and start observing
-                if (fetchedUserId != userId) {
-                    userId = fetchedUserId
-                    securePrefs.setUserId(userId)
+                val currentUser = userRepository.getCurrentUserSync()
+                val resolvedUserId = currentUser?.id ?: securePrefs.getUserId()
+
+                if (resolvedUserId.isNullOrBlank()) {
+                    _uiState.value = HomeUiState.Error("Authenticated user details are unavailable. Please reopen the app.")
+                    return@launch
+                }
+
+                if (resolvedUserId != userId) {
+                    userId = resolvedUserId
                     observeCurrentFolder()
                 }
 
