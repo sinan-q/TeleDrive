@@ -54,11 +54,20 @@ class MainActivity : FragmentActivity() {
                     hasMasterPassword && !authOnLaunch -> {
                         // Auto-derive encryption key from stored password
                         val storedPassword = securePrefs.getBiometricPassword()
-                        if (storedPassword != null && !encryptionManager.isUnlocked) {
+                        val didUnlock = if (storedPassword != null && !encryptionManager.isUnlocked) {
                             encryptionManager.unlockWithPassword(storedPassword)
+                        } else {
+                            encryptionManager.isUnlocked
                         }
-                        startDest = Route.Home
-                        isFirstTimeSetup = false
+
+                        if (didUnlock) {
+                            startDest = Route.Home
+                            isFirstTimeSetup = false
+                        } else {
+                            securePrefs.clearBiometricPassword()
+                            startDest = Route.MasterPassword()
+                            isFirstTimeSetup = false
+                        }
                     }
                     // Has session + has master password + auth enabled → show MasterPassword screen
                     hasMasterPassword -> {
