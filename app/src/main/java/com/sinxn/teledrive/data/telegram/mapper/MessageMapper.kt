@@ -19,7 +19,7 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
     var originalFileName: String? = null
 
     // Helper to evaluate parts
-    fun parseMultipart(fileName: String) {
+    fun parseMultipart(fileName: String): String {
         val cleanName = if (fileName.endsWith(".enc")) {
             fileName.removeSuffix(".enc")
         } else fileName
@@ -32,6 +32,7 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
         } else {
             originalFileName = cleanName
         }
+        return cleanName
     }
 
     return when (val content = this.content) {
@@ -43,11 +44,11 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
                 return null
             }
             
-            parseMultipart(fileName)
+            val cleanName = parseMultipart(fileName)
             
             FileEntity(
                 id = entityId,
-                name = fileName,
+                name = cleanName,
                 type = "file",
                 mimeType = content.document.mimeType,
                 isMultipart = isMultipart,
