@@ -11,7 +11,9 @@ enum class StorageLocationKind {
 data class StorageLocationOption(
     val id: Long,
     val title: String,
-    val kind: StorageLocationKind
+    val kind: StorageLocationKind,
+    val photoFileId: Int? = null,
+    val photoPath: String? = null
 )
 
 fun TdApi.Chat.toStorageLocationOption(): StorageLocationOption {
@@ -25,6 +27,10 @@ fun TdApi.Chat.toStorageLocationOption(): StorageLocationOption {
     return StorageLocationOption(
         id = id,
         title = title,
-        kind = kind
+        kind = kind,
+        photoFileId = photo?.small?.id,
+        photoPath = photo?.small?.local
+            ?.takeIf { it.isDownloadingCompleted && it.path.isNotEmpty() }
+            ?.path
     )
 }

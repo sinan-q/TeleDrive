@@ -18,6 +18,9 @@ class StorageSelectionViewModel @Inject constructor(
     private val telegramClient: TelegramClient
 ) : ViewModel() {
 
+    private val selectedChannelId: Long?
+        get() = securePrefs.getStorageChannelId()
+
     private val _selectedChannelName = MutableStateFlow(
         securePrefs.getStorageChannelName() ?: "Saved Messages"
     )
@@ -26,6 +29,9 @@ class StorageSelectionViewModel @Inject constructor(
     private val _selectedChannelKind = MutableStateFlow(StorageLocationKind.SavedMessages)
     val selectedChannelKind: StateFlow<StorageLocationKind> = _selectedChannelKind.asStateFlow()
 
+    private val _selectedChannelPhotoPath = MutableStateFlow<String?>(null)
+    val selectedChannelPhotoPath: StateFlow<String?> = _selectedChannelPhotoPath.asStateFlow()
+
     private val _chats = MutableStateFlow<List<StorageLocationOption>>(emptyList())
     val chats: StateFlow<List<StorageLocationOption>> = _chats.asStateFlow()
 
@@ -33,14 +39,42 @@ class StorageSelectionViewModel @Inject constructor(
     val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
 
     init {
+        observeFileUpdates()
         refreshSelectedChannel()
     }
 
+    private fun observeFileUpdates() {
+        viewModelScope.launch {
+            telegramClient.updates.collect { update ->
+                if (update is TdApi.UpdateFile) {
+                    val local = update.file.local
+                    if (!local.isDownloadingCompleted || local.path.isEmpty()) return@collect
+
+                    _chats.value = _chats.value.map { chat ->
+                        if (chat.photoFileId == update.file.id) {
+                            chat.copy(photoPath = local.path)
+                        } else {
+                            chat
+                        }
+                    }
+
+                    val configuredChatId = selectedChannelId
+                    if (configuredChatId != null) {
+                        _chats.value.firstOrNull { it.id == configuredChatId }?.let { selectedChat ->
+                            _selectedChannelPhotoPath.value = selectedChat.photoPath
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun refreshSelectedChannel() {
-        val selectedChatId = securePrefs.getStorageChannelId()
+        val selectedChatId = selectedChannelId
         if (selectedChatId == null) {
             _selectedChannelName.value = "Saved Messages"
             _selectedChannelKind.value = StorageLocationKind.SavedMessages
+            _selectedChannelPhotoPath.value = null
             return
         }
 
@@ -53,6 +87,8 @@ class StorageSelectionViewModel @Inject constructor(
                         val selectedChat = chatObj.toStorageLocationOption()
                         _selectedChannelName.value = selectedChat.title
                         _selectedChannelKind.value = selectedChat.kind
+                        _selectedChannelPhotoPath.value = selectedChat.photoPath
+                        selectedChat.photoFileId?.let(::requestChatPhoto)
                     }
                 }
         }
@@ -75,7 +111,9 @@ class StorageSelectionViewModel @Inject constructor(
                 val loadedChats = chatIds.mapNotNull { id ->
                     val chatObj = telegramClient.send(TdApi.GetChat(id))
                     if (chatObj is TdApi.Chat) {
-                        chatObj.toStorageLocationOption()
+                        chatObj.toStorageLocationOption().also { chat ->
+                            chat.photoFileId?.let(::requestChatPhoto)
+                        }
                     } else null
                 }.filter {
                     query.isEmpty() || it.title.contains(query, ignoreCase = true)
@@ -109,11 +147,17 @@ class StorageSelectionViewModel @Inject constructor(
             securePrefs.setStorageChannelName(null)
             _selectedChannelName.value = "Saved Messages"
             _selectedChannelKind.value = StorageLocationKind.SavedMessages
+            _selectedChannelPhotoPath.value = null
         } else {
             securePrefs.setStorageChannelId(id)
             securePrefs.setStorageChannelName(title)
             _selectedChannelName.value = title
             _selectedChannelKind.value = kind
+            _selectedChannelPhotoPath.value = _chats.value.firstOrNull { it.id == id }?.photoPath
         }
+    }
+
+    private fun requestChatPhoto(fileId: Int) {
+        telegramClient.sendAsync(TdApi.DownloadFile(fileId, 1, 0, 0, false)) { }
     }
 }

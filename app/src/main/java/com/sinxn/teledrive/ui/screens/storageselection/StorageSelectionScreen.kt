@@ -1,5 +1,7 @@
 package com.sinxn.teledrive.ui.screens.storageselection
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,9 +15,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +34,7 @@ fun StorageSelectionScreen(
 ) {
     val selectedChannelName by viewModel.selectedChannelName.collectAsState()
     val selectedChannelKind by viewModel.selectedChannelKind.collectAsState()
+    val selectedChannelPhotoPath by viewModel.selectedChannelPhotoPath.collectAsState()
     var showChannelPicker by remember { mutableStateOf(false) }
     var syncExistingFiles by remember { mutableStateOf(false) }
 
@@ -58,11 +66,10 @@ fun StorageSelectionScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                imageVector = selectedChannelKind.icon(),
-                contentDescription = null,
-                modifier = Modifier.size(72.dp),
-                tint = MaterialTheme.colorScheme.primary
+            StorageLocationAvatar(
+                photoPath = selectedChannelPhotoPath,
+                kind = selectedChannelKind,
+                modifier = Modifier.size(72.dp)
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -99,7 +106,11 @@ fun StorageSelectionScreen(
                     headlineContent = { Text("Storage Location") },
                     supportingContent = { Text(selectedChannelName) },
                     leadingContent = {
-                        Icon(selectedChannelKind.icon(), contentDescription = null)
+                        StorageLocationAvatar(
+                            photoPath = selectedChannelPhotoPath,
+                            kind = selectedChannelKind,
+                            modifier = Modifier.size(32.dp)
+                        )
                     },
                     trailingContent = {
                         Icon(Icons.Default.ChevronRight, contentDescription = "Change")
@@ -241,7 +252,11 @@ private fun StoragePickerBottomSheet(
                             headlineContent = { Text(chat.title) },
                             supportingContent = { Text(chat.kind.label()) },
                             leadingContent = {
-                                Icon(chat.kind.icon(), contentDescription = null)
+                                StorageLocationAvatar(
+                                    photoPath = chat.photoPath,
+                                    kind = chat.kind,
+                                    modifier = Modifier.size(40.dp)
+                                )
                             },
                             modifier = Modifier.clickable {
                                 onChannelSelected(chat.id, chat.title, chat.kind)
@@ -251,6 +266,50 @@ private fun StoragePickerBottomSheet(
                 }
             }
             Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun StorageLocationAvatar(
+    photoPath: String?,
+    kind: StorageLocationKind,
+    modifier: Modifier = Modifier
+) {
+    val bitmap = produceState<android.graphics.Bitmap?>(initialValue = null, photoPath) {
+        value = if (photoPath.isNullOrBlank()) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val file = File(photoPath)
+                    if (file.exists()) BitmapFactory.decodeFile(file.absolutePath) else null
+                }.getOrNull()
+            }
+        }
+    }.value
+
+    Surface(
+        modifier = modifier.clip(MaterialTheme.shapes.extraLarge),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    imageVector = kind.icon(),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp)
+                )
+            }
         }
     }
 }
