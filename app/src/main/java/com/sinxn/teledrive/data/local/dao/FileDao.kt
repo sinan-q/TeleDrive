@@ -65,9 +65,12 @@ interface FileDao {
     @Query("DELETE FROM files WHERE id = :id")
     suspend fun hardDeleteFile(id: String)
 
-    /** Update the upload progress of an active file (0.0 to 1.0) */
+    /** Update the transfer progress of an active file (0.0 to 1.0) */
     @Query("UPDATE files SET upload_progress = :progress WHERE file_id = :fileId")
-    suspend fun updateUploadProgress(fileId: String, progress: Float)
+    suspend fun updateTransferProgress(fileId: String, progress: Float)
+
+    @Query("UPDATE files SET upload_progress = :progress WHERE id = :id")
+    suspend fun updateTransferProgressById(id: String, progress: Float)
 
     /** Rename a file or folder */
     @Query("UPDATE files SET name = :newName, updated_at = :timestamp WHERE id = :id")

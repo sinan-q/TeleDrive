@@ -51,6 +51,12 @@ class HomeViewModel @Inject constructor(
 
     private val _breadcrumbs = MutableStateFlow<List<FileEntity>>(emptyList())
     val breadcrumbs: StateFlow<List<FileEntity>> = _breadcrumbs.asStateFlow()
+    private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
+    private val _activeDownloads = MutableStateFlow<Set<String>>(emptySet())
+    val activeDownloads: StateFlow<Set<String>> = _activeDownloads.asStateFlow()
+    private val _transferStatusText = MutableStateFlow<Map<String, String>>(emptyMap())
+    val transferStatusText: StateFlow<Map<String, String>> = _transferStatusText.asStateFlow()
 
     private val currentFolder = MutableStateFlow<FileEntity?>(null)
     private var observeJob: Job? = null
@@ -85,10 +91,55 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             fileRepository.downloadEvents.collect { event ->
                 when (event) {
+                    is DownloadEvent.Progress -> {
+                        _activeDownloads.value = _activeDownloads.value + event.fileId
+                        _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+                            if (event.progress >= 1f) remove(event.fileId) else put(event.fileId, event.progress)
+                        }
+                        event.message?.let { message ->
+                            _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                                put(event.fileId, message)
+                            }
+                        }
+                        if (event.progress >= 1f) {
+                            _activeDownloads.value = _activeDownloads.value - event.fileId
+                            _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                                remove(event.fileId)
+                            }
+                        }
+                    }
+                    is DownloadEvent.Status -> {
+                        if (event.fileId != null) {
+                            _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                                put(event.fileId, event.message)
+                            }
+                            _activeDownloads.value = _activeDownloads.value + event.fileId
+                        } else {
+                            _snackbarEvents.emit(event.message)
+                        }
+                    }
                     is DownloadEvent.Success -> {
+                        event.fileId?.let { fileId ->
+                            _activeDownloads.value = _activeDownloads.value - fileId
+                            _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+                                remove(fileId)
+                            }
+                            _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                                remove(fileId)
+                            }
+                        }
                         _snackbarEvents.emit("Saved \"${event.fileName}\" to Downloads/TeleDrive")
                     }
                     is DownloadEvent.Failure -> {
+                        event.fileId?.let { fileId ->
+                            _activeDownloads.value = _activeDownloads.value - fileId
+                            _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+                                remove(fileId)
+                            }
+                            _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                                remove(fileId)
+                            }
+                        }
                         _snackbarEvents.emit("Download failed for \"${event.fileName}\": ${event.reason}")
                     }
                 }
@@ -237,10 +288,24 @@ class HomeViewModel @Inject constructor(
     fun downloadFile(file: FileEntity) {
         viewModelScope.launch {
             try {
+                _activeDownloads.value = _activeDownloads.value + file.id
+                _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+                    put(file.id, 0.01f)
+                }
+                _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                    put(file.id, "Preparing file...")
+                }
                 fileRepository.downloadFile(file)
                 _snackbarEvents.emit("Downloading \"${file.name}\"...")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error initiating file download", e)
+                _activeDownloads.value = _activeDownloads.value - file.id
+                _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+                    remove(file.id)
+                }
+                _transferStatusText.value = _transferStatusText.value.toMutableMap().apply {
+                    remove(file.id)
+                }
                 _snackbarEvents.emit("Failed to download \"${file.name}\"")
             }
         }

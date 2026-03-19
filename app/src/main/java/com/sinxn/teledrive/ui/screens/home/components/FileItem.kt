@@ -49,6 +49,9 @@ import java.util.Locale
 @Composable
 fun FileItem(
     file: FileEntity,
+    transferProgress: Float?,
+    isTransferActive: Boolean,
+    transferStatus: String?,
     isGrid: Boolean,
     onClick: () -> Unit,
     onDownloadClick: () -> Unit,
@@ -96,16 +99,41 @@ fun FileItem(
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                     if (file.type == "file") {
-                        if (file.uploadProgress != null && file.uploadProgress < 1.0f) {
+                        if (isTransferActive && (transferProgress == null || transferProgress <= 0f)) {
                             Spacer(modifier = Modifier.height(8.dp))
                             LinearProgressIndicator(
-                                progress = { file.uploadProgress },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(4.dp),
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant
                             )
+                            transferStatus?.let {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else if (transferProgress != null && transferProgress < 1.0f) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { transferProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            transferStatus?.let {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         } else {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
@@ -194,16 +222,43 @@ fun FileItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 if (file.type == "file") {
-                    if (file.uploadProgress != null && file.uploadProgress < 1.0f) {
+                    if (isTransferActive && (transferProgress == null || transferProgress <= 0f)) {
                         Spacer(modifier = Modifier.height(4.dp))
                         LinearProgressIndicator(
-                            progress = { file.uploadProgress },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(4.dp),
                             color = MaterialTheme.colorScheme.primary,
                             trackColor = MaterialTheme.colorScheme.surfaceVariant
                         )
+                        transferStatus?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else if (transferProgress != null && transferProgress < 1.0f) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { transferProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        transferStatus?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     } else {
                         Text(
                             text = buildMetadataLine(sizeText, uploadedDateText, file.mimeType),

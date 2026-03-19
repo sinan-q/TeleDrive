@@ -46,6 +46,7 @@ class FileRepositoryImpl @Inject constructor(
 
     /** Track file IDs that we explicitly asked TDLib to download this session */
     private val pendingDownloads = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+    private val pendingDownloadEntityIds = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
     /** Maps a pending upload's encrypted filename to queued parent folder IDs. */
     private val pendingUploadParents =
@@ -72,12 +73,32 @@ class FileRepositoryImpl @Inject constructor(
                     is TdApi.UpdateFile -> {
                         val file = update.file
                         
-                        // Upload logic
+                        // Upload progress
                         if (file.remote.isUploadingActive && file.expectedSize > 0) {
                             val progress = file.remote.uploadedSize.toFloat() / file.expectedSize.toFloat()
-                            fileDao.updateUploadProgress(file.id.toString(), progress)
+                            fileDao.updateTransferProgress(file.id.toString(), progress)
                         } else if (file.remote.isUploadingCompleted) {
-                            fileDao.updateUploadProgress(file.id.toString(), 1.0f)
+                            fileDao.updateTransferProgress(file.id.toString(), 1.0f)
+                        }
+
+                        // Download progress
+                        if (pendingDownloads.contains(file.id)) {
+                            val totalBytes = maxOf(file.expectedSize.toLong(), file.size.toLong())
+                            val downloaded = file.local.downloadedPrefixSize.toLong()
+                            val progress = when {
+                                totalBytes > 0L -> (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                file.local.isDownloadingActive || downloaded > 0L -> 0.01f
+                                else -> 0f
+                            }
+                            val phaseMessage = when {
+                                file.local.isDownloadingCompleted -> "Preparing cached file..."
+                                file.local.isDownloadingActive || downloaded > 0L -> "Downloading from Telegram..."
+                                else -> "Preparing download..."
+                            }
+                            fileDao.updateTransferProgress(file.id.toString(), progress)
+                            pendingDownloadEntityIds[file.id]?.let { entityId ->
+                                _downloadEvents.tryEmit(DownloadEvent.Progress(entityId, progress, phaseMessage))
+                            }
                         }
 
                         handleCompletedDownload(file)
@@ -255,6 +276,7 @@ class FileRepositoryImpl @Inject constructor(
                 val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, uri)
                 val originalName = pickedFile.displayName
                 val targetChatId = resolveTargetChatId(userId)
+                _downloadEvents.emit(DownloadEvent.Status(null, originalName, "Encrypting \"$originalName\"..."))
 
                 context.contentResolver.openInputStream(uri)?.use { sourceStream ->
                     uploadEncryptedContainer(
@@ -280,35 +302,56 @@ class FileRepositoryImpl @Inject constructor(
             return
         }
 
-        val fileIdStr = file.fileId
-        if (fileIdStr.isNullOrBlank()) {
-            _downloadEvents.emit(DownloadEvent.Failure(file.name, "Missing Telegram file ID"))
-            return
-        }
-        val fileId = fileIdStr.toIntOrNull()
-        if (fileId == null) {
-            _downloadEvents.emit(DownloadEvent.Failure(file.name, "Invalid Telegram file ID"))
-            return
-        }
-        
-        // Track this as an intentional download
-        pendingDownloads.add(fileId)
-        
-        // Priority 32 (default), offset/limit 0 (entire file), synchronous false
-        val downloadRequest = TdApi.DownloadFile(fileId, 32, 0, 0, false)
-        telegramClient.sendAsync(downloadRequest) { result ->
-             if (result is TdApi.Error) {
-                 pendingDownloads.remove(fileId)
-                 Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
-                 _downloadEvents.tryEmit(
-                     DownloadEvent.Failure(file.name, result.message ?: "Failed to start download")
-                 )
-             } else if (result is TdApi.File) {
-                 Log.d("FileRepositoryImpl", "Download request returned file state for ${file.name}")
-                 handleCompletedDownload(result)
-             } else {
-                 Log.d("FileRepositoryImpl", "Download queued to TDLib!")
-             }
+        withContext(Dispatchers.IO) {
+            val resolvedFile = resolveLatestDownloadableFile(file) ?: file
+            val fileIdStr = resolvedFile.fileId
+            if (fileIdStr.isNullOrBlank()) {
+                _downloadEvents.emit(DownloadEvent.Failure(file.id, file.name, "Missing Telegram file ID"))
+                return@withContext
+            }
+            val fileId = fileIdStr.toIntOrNull()
+            if (fileId == null) {
+                _downloadEvents.emit(DownloadEvent.Failure(file.id, file.name, "Invalid Telegram file ID"))
+                return@withContext
+            }
+
+            val chatId = resolvedFile.chatId
+                ?: securePrefs.getStorageChannelId()
+                ?: resolveTargetChatId(resolvedFile.userId)
+            telegramClient.send(TdApi.OpenChat(chatId))
+            resolvedFile.messageId?.toLongOrNull()?.let { messageId ->
+                telegramClient.sendAsync(TdApi.OpenMessageContent(chatId, messageId))
+            }
+
+            pendingDownloads.add(fileId)
+            pendingDownloadEntityIds[fileId] = resolvedFile.id
+            fileDao.updateTransferProgressById(resolvedFile.id, 0.01f)
+            _downloadEvents.emit(DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Checking cache..."))
+            _downloadEvents.emit(DownloadEvent.Progress(resolvedFile.id, 0.01f, "Checking cache..."))
+
+            telegramClient.sendAsync(TdApi.DownloadFile(fileId, 32, 0, 0, false)) { result ->
+                if (result is TdApi.Error) {
+                    pendingDownloads.remove(fileId)
+                    pendingDownloadEntityIds.remove(fileId)
+                    scope.launch {
+                        fileDao.updateTransferProgressById(resolvedFile.id, 1f)
+                    }
+                    Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
+                    _downloadEvents.tryEmit(
+                        DownloadEvent.Failure(resolvedFile.id, resolvedFile.name, result.message ?: "Failed to start download")
+                    )
+                } else if (result is TdApi.File && result.local.isDownloadingCompleted && result.local.path.isNotEmpty()) {
+                    _downloadEvents.tryEmit(
+                        DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Preparing cached file...")
+                    )
+                    handleCompletedDownload(result)
+                } else {
+                    Log.d("FileRepositoryImpl", "Download queued for ${resolvedFile.name}")
+                    _downloadEvents.tryEmit(
+                        DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Downloading from Telegram...")
+                    )
+                }
+            }
         }
     }
 
@@ -319,13 +362,16 @@ class FileRepositoryImpl @Inject constructor(
         if (!pendingDownloads.remove(file.id)) {
             return
         }
+        val entityId = pendingDownloadEntityIds.remove(file.id)
 
         scope.launch {
+            fileDao.updateTransferProgress(file.id.toString(), 1.0f)
+            entityId?.let { _downloadEvents.emit(DownloadEvent.Progress(it, 1.0f, "Finalizing...")) }
             val fileEntity = fileDao.getFileByFileId(file.id.toString())
             if (fileEntity == null) {
                 Log.e("FileRepositoryImpl", "Downloaded file ${file.id} is not present in Room")
                 _downloadEvents.emit(
-                    DownloadEvent.Failure("Unknown file", "Downloaded file metadata was not found")
+                    DownloadEvent.Failure(entityId, "Unknown file", "Downloaded file metadata was not found")
                 )
                 return@launch
             }
@@ -338,7 +384,9 @@ class FileRepositoryImpl @Inject constructor(
                 val exported = if (downloadedFile.name.endsWith(".enc")) {
                     val decryptedFile = java.io.File(context.cacheDir, "dec_$exportName")
                     try {
+                        _downloadEvents.emit(DownloadEvent.Status(fileEntity.id, exportName, "Decrypting..."))
                         fileCryptor.decryptFile(downloadedFile, decryptedFile)
+                        _downloadEvents.emit(DownloadEvent.Status(fileEntity.id, exportName, "Saving to Downloads..."))
                         com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
                             context, decryptedFile, exportName, exportMimeType
                         )
@@ -346,22 +394,23 @@ class FileRepositoryImpl @Inject constructor(
                         decryptedFile.delete()
                     }
                 } else {
+                    _downloadEvents.emit(DownloadEvent.Status(fileEntity.id, exportName, "Saving to Downloads..."))
                     com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
                         context, downloadedFile, exportName, exportMimeType
                     )
                 }
 
                 if (exported) {
-                    _downloadEvents.emit(DownloadEvent.Success(exportName))
+                    _downloadEvents.emit(DownloadEvent.Success(fileEntity.id, exportName))
                 } else {
                     _downloadEvents.emit(
-                        DownloadEvent.Failure(exportName, "Could not write file to Downloads/TeleDrive")
+                        DownloadEvent.Failure(fileEntity.id, exportName, "Could not write file to Downloads/TeleDrive")
                     )
                 }
             } catch (e: Exception) {
                 Log.e("FileRepositoryImpl", "Failed to export/decrypt downloaded file", e)
                 _downloadEvents.emit(
-                    DownloadEvent.Failure(fileEntity.name, e.message ?: "Failed to process downloaded file")
+                    DownloadEvent.Failure(fileEntity.id, fileEntity.name, e.message ?: "Failed to process downloaded file")
                 )
             }
         }
@@ -371,17 +420,19 @@ class FileRepositoryImpl @Inject constructor(
         val originalName = file.originalFileName ?: file.name
         val chunks = fileDao.getMultipartFiles(file.userId, originalName)
         if (chunks.isEmpty()) {
-            _downloadEvents.emit(DownloadEvent.Failure(originalName, "No file chunks found"))
+            _downloadEvents.emit(DownloadEvent.Failure(file.id, originalName, "No file chunks found"))
             return
         }
 
         val assembledFile = java.io.File(context.cacheDir, "assembled_${java.util.UUID.randomUUID()}_$originalName")
         try {
+            _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Downloading from Telegram..."))
             java.io.FileOutputStream(assembledFile).use { assembledOutput ->
                 for (chunk in chunks) {
-                    val fileId = chunk.fileId?.toIntOrNull()
+                    val resolvedChunk = resolveLatestDownloadableFile(chunk) ?: chunk
+                    val fileId = resolvedChunk.fileId?.toIntOrNull()
                     if (fileId == null) {
-                        _downloadEvents.emit(DownloadEvent.Failure(originalName, "Missing Telegram file ID for a chunk"))
+                        _downloadEvents.emit(DownloadEvent.Failure(file.id, originalName, "Missing Telegram file ID for a chunk"))
                         return
                     }
 
@@ -390,8 +441,9 @@ class FileRepositoryImpl @Inject constructor(
                         ?: throw IllegalStateException("Chunk download failed for $originalName")
 
                     val downloadedFile = java.io.File(tdFile.local.path)
-                    val decryptedChunk = java.io.File(context.cacheDir, "dec_${java.util.UUID.randomUUID()}_${chunk.name}")
+                    val decryptedChunk = java.io.File(context.cacheDir, "dec_${java.util.UUID.randomUUID()}_${resolvedChunk.name}")
                     try {
+                        _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Decrypting..."))
                         fileCryptor.decryptFile(downloadedFile, decryptedChunk)
                         decryptedChunk.inputStream().use { it.copyTo(assembledOutput) }
                     } finally {
@@ -400,7 +452,14 @@ class FileRepositoryImpl @Inject constructor(
                 }
             }
 
+            chunks.forEach { chunk ->
+                chunk.fileId?.let { id ->
+                    fileDao.updateTransferProgress(id, 1.0f)
+                }
+            }
+
             val exportMimeType = file.mimeType ?: "application/octet-stream"
+            _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Saving to Downloads..."))
             val exported = com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
                 context,
                 assembledFile,
@@ -408,16 +467,16 @@ class FileRepositoryImpl @Inject constructor(
                 exportMimeType
             )
             if (exported) {
-                _downloadEvents.emit(DownloadEvent.Success(originalName))
+                _downloadEvents.emit(DownloadEvent.Success(file.id, originalName))
             } else {
                 _downloadEvents.emit(
-                    DownloadEvent.Failure(originalName, "Could not write file to Downloads/TeleDrive")
+                    DownloadEvent.Failure(file.id, originalName, "Could not write file to Downloads/TeleDrive")
                 )
             }
         } catch (e: Exception) {
             Log.e("FileRepositoryImpl", "Failed to download multipart file", e)
             _downloadEvents.emit(
-                DownloadEvent.Failure(originalName, e.message ?: "Failed to download multipart file")
+                DownloadEvent.Failure(file.id, originalName, e.message ?: "Failed to download multipart file")
             )
         } finally {
             assembledFile.delete()
@@ -563,6 +622,42 @@ class FileRepositoryImpl @Inject constructor(
             ) as TdApi.Chat
             chat.id
         }
+    }
+
+    private suspend fun resolveLatestDownloadableFile(file: FileEntity): FileEntity? {
+        val messageId = file.messageId?.toLongOrNull() ?: return file
+        val chatId = when {
+            file.chatId != null && file.chatId != 0L -> file.chatId
+            securePrefs.getStorageChannelId() != null -> securePrefs.getStorageChannelId()
+            else -> {
+                val chat = telegramClient.send(
+                    TdApi.CreatePrivateChat(file.userId.toLong(), true)
+                ) as TdApi.Chat
+                chat.id
+            }
+        } ?: return file
+
+        val message = runCatching {
+            telegramClient.send(TdApi.GetMessage(chatId, messageId))
+        }.getOrNull() as? TdApi.Message ?: return file
+
+        val refreshed = message.toFileEntity(file.userId, file.parentId) ?: return file
+        val merged = refreshed.copy(
+            id = file.id,
+            name = file.name,
+            mimeType = file.mimeType ?: refreshed.mimeType,
+            isMultipart = file.isMultipart || refreshed.isMultipart,
+            partIndex = file.partIndex ?: refreshed.partIndex,
+            totalParts = file.totalParts ?: refreshed.totalParts,
+            originalFileName = file.originalFileName ?: refreshed.originalFileName,
+            parentId = file.parentId ?: refreshed.parentId,
+            createdAt = file.createdAt,
+            updatedAt = System.currentTimeMillis(),
+            uploadedAt = file.uploadedAt ?: refreshed.uploadedAt
+        )
+
+        fileDao.updateFile(merged)
+        return merged
     }
 
     private suspend fun uploadEncryptedContainer(

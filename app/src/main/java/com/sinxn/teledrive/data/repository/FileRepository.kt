@@ -78,8 +78,10 @@ interface FileRepository {
 }
 
 sealed interface DownloadEvent {
-    data class Success(val fileName: String) : DownloadEvent
-    data class Failure(val fileName: String, val reason: String) : DownloadEvent
+    data class Progress(val fileId: String, val progress: Float, val message: String? = null) : DownloadEvent
+    data class Status(val fileId: String?, val fileName: String, val message: String) : DownloadEvent
+    data class Success(val fileId: String?, val fileName: String) : DownloadEvent
+    data class Failure(val fileId: String?, val fileName: String, val reason: String) : DownloadEvent
 }
 
 data class FileFolderSummary(

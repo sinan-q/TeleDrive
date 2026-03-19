@@ -14,6 +14,9 @@ import com.sinxn.teledrive.data.local.entity.FileEntity
 @Composable
 fun FileGridView(
     files: List<FileEntity>,
+    downloadProgress: Map<String, Float>,
+    activeDownloads: Set<String>,
+    transferStatusText: Map<String, String>,
     onFileClick: (FileEntity) -> Unit,
     onDownloadClick: (FileEntity) -> Unit,
     onDeleteClick: (FileEntity) -> Unit,
@@ -31,6 +34,9 @@ fun FileGridView(
         items(files, key = { it.id }) { file ->
             FileItem(
                 file = file,
+                transferProgress = downloadProgress[file.id] ?: file.uploadProgress,
+                isTransferActive = activeDownloads.contains(file.id),
+                transferStatus = transferStatusText[file.id],
                 isGrid = true,
                 onClick = { onFileClick(file) },
                 onDownloadClick = { onDownloadClick(file) },

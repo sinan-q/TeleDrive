@@ -59,6 +59,9 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val isGridView by viewModel.isGridView.collectAsState()
     val breadcrumbs by viewModel.breadcrumbs.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val activeDownloads by viewModel.activeDownloads.collectAsState()
+    val transferStatusText by viewModel.transferStatusText.collectAsState()
 
     // Intercept physical/gesture back button if we are inside a folder
     BackHandler(enabled = breadcrumbs.isNotEmpty()) {
@@ -165,6 +168,9 @@ fun HomeScreen(
                             if (gridMode) {
                                 FileGridView(
                                     files = visibleFiles,
+                                    downloadProgress = downloadProgress,
+                                    activeDownloads = activeDownloads,
+                                    transferStatusText = transferStatusText,
                                     onFileClick = { file ->
                                         if (file.type == "folder") {
                                             viewModel.navigateToFolder(file)
@@ -188,6 +194,9 @@ fun HomeScreen(
                             } else {
                                 FileListView(
                                     files = visibleFiles,
+                                    downloadProgress = downloadProgress,
+                                    activeDownloads = activeDownloads,
+                                    transferStatusText = transferStatusText,
                                     onFileClick = { file ->
                                         if (file.type == "folder") {
                                             viewModel.navigateToFolder(file)
