@@ -2,6 +2,8 @@ package com.sinxn.teledrive.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
+import com.sinxn.teledrive.data.crypto.EncryptionManager
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
+import javax.crypto.Cipher
 
 data class TelegramChat(
     val id: Long,
@@ -21,7 +24,9 @@ data class TelegramChat(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val securePrefs: SecurePrefs,
-    private val telegramClient: TelegramClient
+    private val telegramClient: TelegramClient,
+    private val encryptionManager: EncryptionManager,
+    private val biometricPasswordStore: BiometricPasswordStore
 ) : ViewModel() {
 
     private val _selectedChannelName = MutableStateFlow(
@@ -38,7 +43,9 @@ class SettingsViewModel @Inject constructor(
     private val _authOnLaunch = MutableStateFlow(securePrefs.isAuthOnLaunchEnabled())
     val authOnLaunch: StateFlow<Boolean> = _authOnLaunch.asStateFlow()
 
-    private val _biometricUnlock = MutableStateFlow(securePrefs.isBiometricUnlockEnabled())
+    private val _biometricUnlock = MutableStateFlow(
+        securePrefs.isBiometricUnlockEnabled() && securePrefs.getBiometricUnlockSecret() != null
+    )
     val biometricUnlock: StateFlow<Boolean> = _biometricUnlock.asStateFlow()
 
     fun loadChats(query: String = "") {
@@ -98,13 +105,37 @@ class SettingsViewModel @Inject constructor(
         securePrefs.setAuthOnLaunch(enabled)
         _authOnLaunch.value = enabled
         if (!enabled) {
-            securePrefs.setBiometricUnlock(false)
-            _biometricUnlock.value = false
+            disableBiometricUnlock()
         }
     }
 
-    fun setBiometricUnlock(enabled: Boolean) {
-        securePrefs.setBiometricUnlock(enabled)
-        _biometricUnlock.value = enabled
+    fun prepareBiometricEnrollmentCipher(): Cipher? {
+        if (!encryptionManager.isUnlocked) return null
+        return try {
+            biometricPasswordStore.createBiometricEncryptCipher()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun enableBiometricUnlock(cipher: Cipher): Boolean {
+        return try {
+            val encryptedSecret = biometricPasswordStore.encryptForBiometric(
+                encryptionManager.getSessionPassword(),
+                cipher
+            )
+            securePrefs.setBiometricUnlockSecret(encryptedSecret)
+            securePrefs.setBiometricUnlock(true)
+            _biometricUnlock.value = true
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun disableBiometricUnlock() {
+        securePrefs.clearBiometricUnlockSecret()
+        securePrefs.setBiometricUnlock(false)
+        _biometricUnlock.value = false
     }
 }

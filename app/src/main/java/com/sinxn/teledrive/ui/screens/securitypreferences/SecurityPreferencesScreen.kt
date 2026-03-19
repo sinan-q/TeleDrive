@@ -1,5 +1,6 @@
 package com.sinxn.teledrive.ui.screens.securitypreferences
 
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
@@ -8,21 +9,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SecurityPreferencesScreen(
-    securePrefs: SecurePrefs,
     onContinue: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: SecurityPreferencesViewModel = hiltViewModel()
 ) {
-    var authOnLaunch by remember { mutableStateOf(securePrefs.isAuthOnLaunchEnabled()) }
-    var biometricUnlock by remember { mutableStateOf(securePrefs.isBiometricUnlockEnabled()) }
+    val authOnLaunch by viewModel.authOnLaunch.collectAsState()
+    val biometricUnlock by viewModel.biometricUnlock.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Security") }
@@ -90,12 +99,7 @@ fun SecurityPreferencesScreen(
                             Switch(
                                 checked = authOnLaunch,
                                 onCheckedChange = { enabled ->
-                                    authOnLaunch = enabled
-                                    securePrefs.setAuthOnLaunch(enabled)
-                                    if (!enabled) {
-                                        biometricUnlock = false
-                                        securePrefs.setBiometricUnlock(false)
-                                    }
+                                    viewModel.setAuthOnLaunch(enabled)
                                 }
                             )
                         },
@@ -114,8 +118,51 @@ fun SecurityPreferencesScreen(
                                 Switch(
                                     checked = biometricUnlock,
                                     onCheckedChange = { enabled ->
-                                        biometricUnlock = enabled
-                                        securePrefs.setBiometricUnlock(enabled)
+                                        if (!enabled) {
+                                            viewModel.disableBiometricUnlock()
+                                            return@Switch
+                                        }
+
+                                        val fragmentActivity = context as? FragmentActivity
+                                        val cipher = viewModel.prepareBiometricEnrollmentCipher()
+                                        if (fragmentActivity == null || cipher == null) {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar("Unlock the vault first to enable biometric unlock.")
+                                            }
+                                            return@Switch
+                                        }
+
+                                        val prompt = BiometricPrompt(
+                                            fragmentActivity,
+                                            ContextCompat.getMainExecutor(context),
+                                            object : BiometricPrompt.AuthenticationCallback() {
+                                                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                                    super.onAuthenticationSucceeded(result)
+                                                    val didEnable = result.cryptoObject?.cipher?.let(viewModel::enableBiometricUnlock) == true
+                                                    if (!didEnable) {
+                                                        scope.launch {
+                                                            snackbarHostState.showSnackbar("Could not enable biometric unlock.")
+                                                        }
+                                                    }
+                                                }
+
+                                                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                                                    super.onAuthenticationError(errorCode, errString)
+                                                    scope.launch {
+                                                        snackbarHostState.showSnackbar(errString.toString())
+                                                    }
+                                                }
+                                            }
+                                        )
+
+                                        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                                            .setTitle("Enable biometric unlock")
+                                            .setSubtitle("Use your fingerprint or face to protect the stored unlock secret")
+                                            .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                                            .setNegativeButtonText("Cancel")
+                                            .build()
+
+                                        prompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
                                     }
                                 )
                             },

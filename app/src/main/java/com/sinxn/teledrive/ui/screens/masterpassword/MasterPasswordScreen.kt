@@ -1,7 +1,6 @@
 package com.sinxn.teledrive.ui.screens.masterpassword
 
 import android.os.Build
-import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedContent
@@ -89,6 +88,7 @@ fun MasterPasswordScreen(
     LaunchedEffect(showBiometricPrompt) {
         if (showBiometricPrompt && !isSetupMode) {
             val fragmentActivity = context as? FragmentActivity
+            val cipher = viewModel.prepareBiometricUnlockCipher()
             if (fragmentActivity != null) {
                 val executor = ContextCompat.getMainExecutor(context)
                 val biometricPrompt = BiometricPrompt(
@@ -97,7 +97,7 @@ fun MasterPasswordScreen(
                     object : BiometricPrompt.AuthenticationCallback() {
                         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                             super.onAuthenticationSucceeded(result)
-                            viewModel.unlockWithBiometric()
+                            viewModel.unlockWithBiometric(result.cryptoObject?.cipher)
                         }
 
                         override fun onAuthenticationError(
@@ -117,10 +117,14 @@ fun MasterPasswordScreen(
                 val promptInfo = BiometricPrompt.PromptInfo.Builder()
                     .setTitle("Unlock TeleDrive")
                     .setSubtitle("Authenticate to access your encrypted files")
-                    .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                    .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
                     .build()
 
-                biometricPrompt.authenticate(promptInfo)
+                if (cipher != null) {
+                    biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+                } else {
+                    viewModel.fallbackToPassword()
+                }
             } else {
                 viewModel.fallbackToPassword()
             }

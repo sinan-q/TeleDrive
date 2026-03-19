@@ -104,12 +104,16 @@ class AuthManager @Inject constructor(
             is TdApi.AuthorizationStateLoggingOut -> {
                 securePrefs.setHasSession(false)
                 securePrefs.clearUserId()
+                securePrefs.clearAutoUnlockSecret()
+                securePrefs.clearBiometricUnlockSecret()
                 _authState.value = AuthState.LoggingOut
                 clearCachedUser()
             }
             is TdApi.AuthorizationStateClosed -> {
                 securePrefs.setHasSession(false)
                 securePrefs.clearUserId()
+                securePrefs.clearAutoUnlockSecret()
+                securePrefs.clearBiometricUnlockSecret()
                 _authState.value = AuthState.Closed
                 clearCachedUser()
             }

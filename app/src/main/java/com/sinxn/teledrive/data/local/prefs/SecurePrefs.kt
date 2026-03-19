@@ -33,14 +33,23 @@ interface SecurePrefs {
     /** Clear the master password (used during logout / reset) */
     fun clearMasterPassword()
 
-    /** Store the plaintext master password for Biometric unlock */
-    fun setBiometricPassword(password: String)
+    /** Store the master password encrypted with a non-biometric Android Keystore key for silent auto-unlock */
+    fun setAutoUnlockSecret(secret: String)
 
-    /** Retrieve the plaintext master password for Biometric unlock */
-    fun getBiometricPassword(): String?
+    /** Retrieve the encrypted payload used for silent auto-unlock */
+    fun getAutoUnlockSecret(): String?
 
-    /** Clear the biometric password */
-    fun clearBiometricPassword()
+    /** Clear the silent auto-unlock payload */
+    fun clearAutoUnlockSecret()
+
+    /** Store the master password encrypted with a biometric-gated Android Keystore key */
+    fun setBiometricUnlockSecret(secret: String)
+
+    /** Retrieve the encrypted payload used for biometric unlock */
+    fun getBiometricUnlockSecret(): String?
+
+    /** Clear the biometric unlock payload */
+    fun clearBiometricUnlockSecret()
 
     /** Store the preferred storage channel ID (null means default/Saved Messages) */
     fun setStorageChannelId(chatId: Long?)
@@ -77,7 +86,8 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_USER_ID = "key_user_id"
         private const val KEY_MASTER_PW_HASH = "key_master_pw_hash"
         private const val KEY_MASTER_PW_SALT = "key_master_pw_salt"
-        private const val KEY_BIOMETRIC_PW = "key_biometric_pw"
+        private const val KEY_AUTO_UNLOCK_SECRET = "key_auto_unlock_secret"
+        private const val KEY_BIOMETRIC_UNLOCK_SECRET = "key_biometric_unlock_secret"
         private const val KEY_STORAGE_CHANNEL_ID = "key_storage_channel_id"
         private const val KEY_STORAGE_CHANNEL_NAME = "key_storage_channel_name"
         private const val KEY_AUTH_ON_LAUNCH = "key_auth_on_launch"
@@ -145,23 +155,40 @@ class SecurePrefsImpl @Inject constructor(
         sharedPreferences.edit()
             .remove(KEY_MASTER_PW_HASH)
             .remove(KEY_MASTER_PW_SALT)
-            .remove(KEY_BIOMETRIC_PW)
+            .remove(KEY_AUTO_UNLOCK_SECRET)
+            .remove(KEY_BIOMETRIC_UNLOCK_SECRET)
             .apply()
     }
 
-    override fun setBiometricPassword(password: String) {
+    override fun setAutoUnlockSecret(secret: String) {
         sharedPreferences.edit()
-            .putString(KEY_BIOMETRIC_PW, password)
+            .putString(KEY_AUTO_UNLOCK_SECRET, secret)
             .apply()
     }
 
-    override fun getBiometricPassword(): String? {
-        return sharedPreferences.getString(KEY_BIOMETRIC_PW, null)
+    override fun getAutoUnlockSecret(): String? {
+        return sharedPreferences.getString(KEY_AUTO_UNLOCK_SECRET, null)
     }
 
-    override fun clearBiometricPassword() {
+    override fun clearAutoUnlockSecret() {
         sharedPreferences.edit()
-            .remove(KEY_BIOMETRIC_PW)
+            .remove(KEY_AUTO_UNLOCK_SECRET)
+            .apply()
+    }
+
+    override fun setBiometricUnlockSecret(secret: String) {
+        sharedPreferences.edit()
+            .putString(KEY_BIOMETRIC_UNLOCK_SECRET, secret)
+            .apply()
+    }
+
+    override fun getBiometricUnlockSecret(): String? {
+        return sharedPreferences.getString(KEY_BIOMETRIC_UNLOCK_SECRET, null)
+    }
+
+    override fun clearBiometricUnlockSecret() {
+        sharedPreferences.edit()
+            .remove(KEY_BIOMETRIC_UNLOCK_SECRET)
             .apply()
     }
 

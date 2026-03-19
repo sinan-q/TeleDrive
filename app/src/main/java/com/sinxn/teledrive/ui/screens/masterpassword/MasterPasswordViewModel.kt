@@ -1,6 +1,8 @@
 package com.sinxn.teledrive.ui.screens.masterpassword
 
 import androidx.lifecycle.ViewModel
+import javax.crypto.Cipher
+import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
 import com.sinxn.teledrive.data.crypto.EncryptionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +31,7 @@ sealed interface MasterPasswordUiState {
 
 @HiltViewModel
 class MasterPasswordViewModel @Inject constructor(
+    private val biometricPasswordStore: BiometricPasswordStore,
     private val encryptionManager: EncryptionManager,
     private val securePrefs: SecurePrefs,
     private val fileRepository: FileRepository,
@@ -42,7 +45,7 @@ class MasterPasswordViewModel @Inject constructor(
     val uiState: StateFlow<MasterPasswordUiState> = _uiState.asStateFlow()
 
     private val _showBiometricPrompt = MutableStateFlow(
-        securePrefs.getBiometricPassword() != null && securePrefs.isBiometricUnlockEnabled()
+        securePrefs.getBiometricUnlockSecret() != null && securePrefs.isBiometricUnlockEnabled()
     )
     val showBiometricPrompt: StateFlow<Boolean> = _showBiometricPrompt.asStateFlow()
 
@@ -74,7 +77,7 @@ class MasterPasswordViewModel @Inject constructor(
             } else {
                 encryptionManager.setupPassword(password)
             }
-            securePrefs.setBiometricPassword(password)
+            persistAutoUnlockSecret(password)
             _uiState.value = MasterPasswordUiState.Unlocked
         } catch (e: Exception) {
             _uiState.value = MasterPasswordUiState.Error("Failed to set up encryption: ${e.message}")
@@ -94,7 +97,7 @@ class MasterPasswordViewModel @Inject constructor(
         try {
             val success = encryptionManager.unlockWithPassword(password)
             if (success) {
-                securePrefs.setBiometricPassword(password)
+                persistAutoUnlockSecret(password)
                 _uiState.value = MasterPasswordUiState.Unlocked
             } else {
                 _uiState.value = MasterPasswordUiState.Error("Incorrect password")
@@ -108,16 +111,44 @@ class MasterPasswordViewModel @Inject constructor(
         _uiState.value = MasterPasswordUiState.Idle
     }
 
-    fun unlockWithBiometric() {
-        val password = securePrefs.getBiometricPassword()
-        if (password != null) {
+    fun prepareBiometricUnlockCipher(): Cipher? {
+        val payload = securePrefs.getBiometricUnlockSecret() ?: return null
+        return try {
+            biometricPasswordStore.createBiometricDecryptCipher(payload)
+        } catch (e: Exception) {
+            securePrefs.clearBiometricUnlockSecret()
+            securePrefs.setBiometricUnlock(false)
+            fallbackToPassword()
+            null
+        }
+    }
+
+    fun unlockWithBiometric(cipher: Cipher?) {
+        val payload = securePrefs.getBiometricUnlockSecret()
+        if (payload == null || cipher == null) {
+            fallbackToPassword()
+            return
+        }
+
+        try {
+            val password = biometricPasswordStore.decryptFromBiometric(payload, cipher)
             unlockWithPassword(password)
-        } else {
+        } catch (e: Exception) {
+            if (biometricPasswordStore.isBiometricKeyInvalidated(e)) {
+                securePrefs.clearBiometricUnlockSecret()
+                securePrefs.setBiometricUnlock(false)
+            }
+            _uiState.value = MasterPasswordUiState.Error("Biometric unlock is no longer available. Use your password instead.")
             fallbackToPassword()
         }
     }
 
     fun fallbackToPassword() {
         _showBiometricPrompt.value = false
+    }
+
+    private fun persistAutoUnlockSecret(password: String) {
+        val encryptedSecret = biometricPasswordStore.encryptForAutoUnlock(password)
+        securePrefs.setAutoUnlockSecret(encryptedSecret)
     }
 }

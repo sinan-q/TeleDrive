@@ -5,6 +5,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.rememberNavController
+import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
 import com.sinxn.teledrive.data.crypto.EncryptionManager
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.telegram.AuthManager
@@ -25,6 +26,9 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var encryptionManager: EncryptionManager
+
+    @Inject
+    lateinit var biometricPasswordStore: BiometricPasswordStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,10 +56,10 @@ class MainActivity : FragmentActivity() {
                     }
                     // Has session + has master password + auth disabled → auto-unlock, go to Home
                     hasMasterPassword && !authOnLaunch -> {
-                        // Auto-derive encryption key from stored password
-                        val storedPassword = securePrefs.getBiometricPassword()
-                        val didUnlock = if (storedPassword != null && !encryptionManager.isUnlocked) {
-                            encryptionManager.unlockWithPassword(storedPassword)
+                        val storedSecret = securePrefs.getAutoUnlockSecret()
+                        val didUnlock = if (storedSecret != null && !encryptionManager.isUnlocked) {
+                            val decryptedPassword = biometricPasswordStore.decryptForAutoUnlock(storedSecret)
+                            decryptedPassword != null && encryptionManager.unlockWithPassword(decryptedPassword)
                         } else {
                             encryptionManager.isUnlocked
                         }
@@ -64,7 +68,7 @@ class MainActivity : FragmentActivity() {
                             startDest = Route.Home
                             isFirstTimeSetup = false
                         } else {
-                            securePrefs.clearBiometricPassword()
+                            securePrefs.clearAutoUnlockSecret()
                             startDest = Route.MasterPassword()
                             isFirstTimeSetup = false
                         }

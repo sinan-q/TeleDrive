@@ -88,7 +88,6 @@ fun TeleDriveNavHost(
 
         composable<Route.SecurityPreferences> {
             SecurityPreferencesScreen(
-                securePrefs = securePrefs,
                 onContinue = {
                     navController.navigate(Route.Home) {
                         popUpTo(Route.SecurityPreferences) { inclusive = true }
