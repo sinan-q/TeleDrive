@@ -19,11 +19,6 @@ class AuthViewModel @Inject constructor(
 
     val authState: StateFlow<AuthState> = authManager.authState
 
-    init {
-        // Start the TDLib client when the ViewModel is created
-        authManager.startClient()
-    }
-
     fun sendPhoneNumber(phoneNumber: String) {
         authManager.sendPhoneNumber(phoneNumber)
     }

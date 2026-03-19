@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +17,7 @@ import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manages TDLib authentication lifecycle.
@@ -40,12 +42,18 @@ class AuthManager @Inject constructor(
 
     // Scope for collecting SharedFlow events from TelegramClient
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val hasStarted = AtomicBoolean(false)
 
     /**
      * Starts the TDLib client and begins listening for auth state updates.
      * Call this once from the Application or ViewModel.
      */
     fun startClient() {
+        if (!hasStarted.compareAndSet(false, true)) {
+            Log.d(TAG, "startClient() ignored because AuthManager is already started")
+            return
+        }
+
         telegramClient.create()
         
         scope.launch {
