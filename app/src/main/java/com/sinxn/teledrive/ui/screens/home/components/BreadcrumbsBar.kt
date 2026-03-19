@@ -1,6 +1,7 @@
 package com.sinxn.teledrive.ui.screens.home.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -27,7 +28,8 @@ fun BreadcrumbsBar(
     modifier: Modifier = Modifier
 ) {
     LazyRow(
-        modifier = modifier.padding(vertical = 8.dp),
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         item {
