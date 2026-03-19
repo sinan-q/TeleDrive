@@ -42,6 +42,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun FileItem(
@@ -58,6 +61,7 @@ fun FileItem(
 
     val icon = getIconForMimeType(file)
     val sizeText = formatFileSize(file.size)
+    val uploadedDateText = formatUploadedDate(file.uploadedAt)
 
     if (isGrid) {
         Card(
@@ -96,19 +100,30 @@ fun FileItem(
                             Spacer(modifier = Modifier.height(8.dp))
                             LinearProgressIndicator(
                                 progress = { file.uploadProgress },
-                                modifier = Modifier.fillMaxWidth().height(4.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp),
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant
                             )
                         } else {
-                            Text(
-                                text = sizeText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = sizeText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                uploadedDateText?.let { dateText ->
+                                    Text(
+                                        text = dateText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
-                } // End Column
+                }
 
                 Box(modifier = Modifier.align(Alignment.TopEnd)) {
                     IconButton(onClick = { showMenu = true }) {
@@ -154,8 +169,8 @@ fun FileItem(
                         )
                     }
                 }
-            } // End Box
-        } // End Card
+            }
+        }
     } else {
         Row(
             modifier = modifier
@@ -183,13 +198,15 @@ fun FileItem(
                         Spacer(modifier = Modifier.height(4.dp))
                         LinearProgressIndicator(
                             progress = { file.uploadProgress },
-                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp),
                             color = MaterialTheme.colorScheme.primary,
                             trackColor = MaterialTheme.colorScheme.surfaceVariant
                         )
                     } else {
                         Text(
-                            text = "$sizeText • ${file.mimeType ?: "Unknown"}",
+                            text = buildMetadataLine(sizeText, uploadedDateText, file.mimeType),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -246,27 +263,43 @@ fun FileItem(
     }
 }
 
-/**
- * Returns a Pair of (Icon Vector, Color) based on file metadata.
- */
 @Composable
 private fun getIconForMimeType(file: FileEntity): Pair<ImageVector, Color> {
     if (file.type == "folder") return Pair(Icons.Default.Folder, MaterialTheme.colorScheme.primary)
-    
+
     val mimeType = file.mimeType ?: ""
     return when {
-        mimeType.startsWith("image/") -> Pair(Icons.Default.Image, Color(0xFF4CAF50)) // Green
-        mimeType.startsWith("video/") -> Pair(Icons.Default.VideoFile, Color(0xFFF44336)) // Red
-        mimeType.startsWith("audio/") -> Pair(Icons.Default.AudioFile, Color(0xFFFF9800)) // Orange
-        mimeType == "application/pdf" -> Pair(Icons.Default.PictureAsPdf, Color(0xFFB71C1C)) // Deep Red
-        mimeType.contains("word") || mimeType.contains("document") -> Pair(Icons.Default.Description, Color(0xFF2196F3)) // Blue
-        else -> Pair(Icons.Default.InsertDriveFile, MaterialTheme.colorScheme.onSurfaceVariant) // Gray/Default
+        mimeType.startsWith("image/") -> Pair(Icons.Default.Image, Color(0xFF4CAF50))
+        mimeType.startsWith("video/") -> Pair(Icons.Default.VideoFile, Color(0xFFF44336))
+        mimeType.startsWith("audio/") -> Pair(Icons.Default.AudioFile, Color(0xFFFF9800))
+        mimeType == "application/pdf" -> Pair(Icons.Default.PictureAsPdf, Color(0xFFB71C1C))
+        mimeType.contains("word") || mimeType.contains("document") -> {
+            Pair(Icons.Default.Description, Color(0xFF2196F3))
+        }
+        else -> Pair(Icons.Default.InsertDriveFile, MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 private fun formatFileSize(size: Long?): String {
     if (size == null || size == 0L) return "Unknown"
     if (size < 1024) return "$size B"
-    val z = (63 - java.lang.Long.numberOfLeadingZeros(size)) / 10
-    return String.format("%.1f %sB", size.toDouble() / (1L shl (z * 10)), " KMGTPE"[z])
+    val sizeBucket = (63 - java.lang.Long.numberOfLeadingZeros(size)) / 10
+    return String.format(
+        Locale.getDefault(),
+        "%.1f %sB",
+        size.toDouble() / (1L shl (sizeBucket * 10)),
+        " KMGTPE"[sizeBucket]
+    )
+}
+
+private fun formatUploadedDate(uploadedAt: Long?): String? {
+    if (uploadedAt == null || uploadedAt <= 0L) return null
+    return SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(uploadedAt))
+}
+
+private fun buildMetadataLine(sizeText: String, uploadedDateText: String?, mimeType: String?): String {
+    val parts = mutableListOf(sizeText)
+    uploadedDateText?.let(parts::add)
+    parts.add(mimeType ?: "Unknown")
+    return parts.joinToString(" | ")
 }
