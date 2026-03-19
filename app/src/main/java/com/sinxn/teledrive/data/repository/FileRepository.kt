@@ -1,5 +1,6 @@
 package com.sinxn.teledrive.data.repository
 
+import android.net.Uri
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.model.SyncStatus
 import kotlinx.coroutines.flow.Flow
@@ -45,9 +46,9 @@ interface FileRepository {
     fun observeFileFolderCounts(userId: String): Flow<FileFolderSummary>
     
     /**
-     * Uploads a physical file on the device to a specified chat (e.g. Saved Messages).
+     * Uploads a file selected from the device to a specified chat (e.g. Saved Messages).
      */
-    suspend fun uploadFile(filePath: String, userId: String, parentId: String? = null)
+    suspend fun uploadFile(uri: Uri, userId: String, parentId: String? = null): String
 
     /**
      * Triggers TDLib to download the file into its internal cache.

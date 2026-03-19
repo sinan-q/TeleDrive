@@ -7,12 +7,19 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.UUID
 
 object FileUtils {
+
+    data class PickedFileMetadata(
+        val displayName: String,
+        val mimeType: String?,
+        val sizeBytes: Long?
+    )
 
     /**
      * Resolves an Android Storage Access Framework Uri to a physical file.
@@ -48,6 +55,39 @@ object FileUtils {
             e.printStackTrace()
             null
         }
+    }
+
+    fun resolvePickedFileMetadata(context: Context, uri: Uri): PickedFileMetadata {
+        val resolver = context.contentResolver
+        var fileName = "temp_upload_${UUID.randomUUID()}"
+        var mimeType: String? = resolver.getType(uri)
+        var sizeBytes: Long? = null
+
+        resolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (nameIndex != -1) {
+                    val name = cursor.getString(nameIndex)
+                    if (!name.isNullOrBlank()) {
+                        fileName = name
+                    }
+                }
+                if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                    sizeBytes = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+
+        if (mimeType.isNullOrBlank()) {
+            mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileName.substringAfterLast('.', ""))
+        }
+
+        return PickedFileMetadata(
+            displayName = fileName,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes
+        )
     }
 
     /**

@@ -12,7 +12,6 @@ import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +23,6 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import android.app.Application
@@ -68,18 +66,10 @@ class HomeViewModel @Inject constructor(
                     return@launch
                 }
 
-                val tempFile = withContext(Dispatchers.IO) {
-                    FileUtils.resolveUriToTempFile(application, uri)
-                }
-                
-                if (tempFile != null) {
-                    // Start upload; the new FileRepository update listener will catch it when TDLib finishes
-                    val currentParentId = currentFolder.value?.id
-                    fileRepository.uploadFile(tempFile.absolutePath, activeUserId, currentParentId)
-                    _snackbarEvents.emit("Uploading \"${tempFile.name}\"...")
-                } else {
-                    _snackbarEvents.emit("Could not read the selected file")
-                }
+                val fileName = FileUtils.resolvePickedFileMetadata(application, uri).displayName
+                val currentParentId = currentFolder.value?.id
+                fileRepository.uploadFile(uri, activeUserId, currentParentId)
+                _snackbarEvents.emit("Uploading \"$fileName\"...")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error processing file upload", e)
                 _snackbarEvents.emit("Upload failed")

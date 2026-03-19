@@ -76,6 +76,17 @@ class FileCryptor @Inject constructor(
      * @return the output file (for chaining)
      */
     fun encryptFile(inputFile: File, outputFile: File): File {
+        FileInputStream(inputFile).use { fis ->
+            encryptStream(fis, outputFile)
+        }
+
+        return outputFile
+    }
+
+    /**
+     * Encrypts an [InputStream] directly into [outputFile], avoiding an intermediate plaintext file.
+     */
+    fun encryptStream(inputStream: InputStream, outputFile: File): Long {
         val password = encryptionManager.getSessionPassword()
 
         // Generate fresh per-file salt and IV
@@ -90,6 +101,7 @@ class FileCryptor @Inject constructor(
         val cipher = Cipher.getInstance(AES_ALGORITHM)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
 
+        var bytesReadTotal = 0L
         FileOutputStream(outputFile).use { fos ->
             // Write the fixed header: Salt + IV
             fos.write(salt)
@@ -97,13 +109,11 @@ class FileCryptor @Inject constructor(
 
             // Stream the plaintext through the cipher into the output
             CipherOutputStream(fos, cipher).use { cos ->
-                FileInputStream(inputFile).use { fis ->
-                    fis.copyTo(cos, bufferSize = 8192)
-                }
+                bytesReadTotal = inputStream.copyTo(cos, bufferSize = 8192)
             }
         }
 
-        return outputFile
+        return bytesReadTotal
     }
 
     /**
