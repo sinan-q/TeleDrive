@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.sinxn.teledrive.BuildConfig
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.local.entity.UserEntity
+import com.sinxn.teledrive.data.repository.UserRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +33,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class AuthManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val telegramClient: TelegramClient,
-    private val securePrefs: SecurePrefs
+    private val securePrefs: SecurePrefs,
+    private val userRepository: UserRepository
 ) {
     companion object {
         private const val TAG = "AuthManager"
@@ -96,14 +99,19 @@ class AuthManager @Inject constructor(
             is TdApi.AuthorizationStateReady -> {
                 securePrefs.setHasSession(true)
                 _authState.value = AuthState.Ready
+                syncAuthenticatedUser()
             }
             is TdApi.AuthorizationStateLoggingOut -> {
                 securePrefs.setHasSession(false)
+                securePrefs.clearUserId()
                 _authState.value = AuthState.LoggingOut
+                clearCachedUser()
             }
             is TdApi.AuthorizationStateClosed -> {
                 securePrefs.setHasSession(false)
+                securePrefs.clearUserId()
                 _authState.value = AuthState.Closed
+                clearCachedUser()
             }
             is TdApi.AuthorizationStateClosing -> {
                 // Transitional state, no action needed
@@ -254,6 +262,38 @@ class AuthManager @Inject constructor(
         telegramClient.sendAsync(TdApi.LogOut()) { result ->
             if (result is TdApi.Error) {
                 Log.e(TAG, "LogOut failed: ${result.message}")
+            }
+        }
+    }
+
+    private fun syncAuthenticatedUser() {
+        scope.launch {
+            try {
+                val me = telegramClient.send(TdApi.GetMe()) as TdApi.User
+                val userId = me.id.toString()
+
+                securePrefs.setUserId(userId)
+                userRepository.saveUser(
+                    UserEntity(
+                        id = userId,
+                        tgId = userId,
+                        username = me.usernames?.activeUsernames?.firstOrNull().orEmpty(),
+                        name = "${me.firstName} ${me.lastName}".trim(),
+                        phone = me.phoneNumber
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to sync authenticated user", e)
+            }
+        }
+    }
+
+    private fun clearCachedUser() {
+        scope.launch {
+            try {
+                userRepository.clearUser()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear cached user", e)
             }
         }
     }

@@ -16,6 +16,7 @@ interface SecurePrefs {
     
     fun setUserId(userId: String)
     fun getUserId(): String?
+    fun clearUserId()
 
     /** Returns true if the user has set a master encryption password */
     fun hasMasterPassword(): Boolean
@@ -113,6 +114,12 @@ class SecurePrefsImpl @Inject constructor(
 
     override fun getUserId(): String? {
         return sharedPreferences.getString(KEY_USER_ID, null)
+    }
+
+    override fun clearUserId() {
+        sharedPreferences.edit()
+            .remove(KEY_USER_ID)
+            .apply()
     }
 
     override fun hasMasterPassword(): Boolean {
