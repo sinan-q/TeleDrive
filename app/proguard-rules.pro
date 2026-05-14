@@ -28,3 +28,18 @@
 
 # Keep Kotlinx Serialization if used with reflection (though usually not needed with the plugin)
 -keepattributes *Annotation*, InnerClasses, Signature, Exceptions, SourceFile, LineNumberTable
+
+# Keep type-safe navigation routes and serializers so process-death state restore
+# continues to work in minified builds.
+-keep class com.sinxn.teledrive.navigation.Route { *; }
+-keep class com.sinxn.teledrive.navigation.Route$* { *; }
+-keep class com.sinxn.teledrive.navigation.**$$serializer { *; }
+-keepclassmembers class com.sinxn.teledrive.navigation.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Keep backup document serializers for import/export compatibility in release.
+-keep class com.sinxn.teledrive.data.backup.**$$serializer { *; }
+-keepclassmembers class com.sinxn.teledrive.data.backup.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}

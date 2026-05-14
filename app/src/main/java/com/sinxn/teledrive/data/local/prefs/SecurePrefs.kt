@@ -1,11 +1,14 @@
 package com.sinxn.teledrive.data.local.prefs
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import androidx.core.content.edit
 
 /**
  * Interface defining secure local storage operations.
@@ -81,7 +84,10 @@ class SecurePrefsImpl @Inject constructor(
 ) : SecurePrefs {
 
     companion object {
+        private const val TAG = "SecurePrefs"
         private const val PREFS_FILE_NAME = "teledrive_secure_prefs"
+        private const val KEY_KEYSET_PREFS = "${PREFS_FILE_NAME}__androidx_security_crypto_encrypted_prefs_key_keyset__"
+        private const val VALUE_KEYSET_PREFS = "${PREFS_FILE_NAME}__androidx_security_crypto_encrypted_prefs_value_keyset__"
         private const val KEY_HAS_SESSION = "key_has_session"
         private const val KEY_USER_ID = "key_user_id"
         private const val KEY_MASTER_PW_HASH = "key_master_pw_hash"
@@ -94,22 +100,12 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_BIOMETRIC_UNLOCK = "key_biometric_unlock"
     }
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-
-    private val sharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        PREFS_FILE_NAME,
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private val sharedPreferences = createEncryptedPrefs(context)
 
     override fun setHasSession(hasSession: Boolean) {
-        sharedPreferences.edit()
-            .putBoolean(KEY_HAS_SESSION, hasSession)
-            .apply()
+        sharedPreferences.edit {
+            putBoolean(KEY_HAS_SESSION, hasSession)
+        }
     }
 
     override fun hasSession(): Boolean {
@@ -117,9 +113,9 @@ class SecurePrefsImpl @Inject constructor(
     }
 
     override fun setUserId(userId: String) {
-        sharedPreferences.edit()
-            .putString(KEY_USER_ID, userId)
-            .apply()
+        sharedPreferences.edit {
+            putString(KEY_USER_ID, userId)
+        }
     }
 
     override fun getUserId(): String? {
@@ -127,9 +123,9 @@ class SecurePrefsImpl @Inject constructor(
     }
 
     override fun clearUserId() {
-        sharedPreferences.edit()
-            .remove(KEY_USER_ID)
-            .apply()
+        sharedPreferences.edit {
+            remove(KEY_USER_ID)
+        }
     }
 
     override fun hasMasterPassword(): Boolean {
@@ -137,10 +133,10 @@ class SecurePrefsImpl @Inject constructor(
     }
 
     override fun setMasterPasswordHash(hash: String, salt: String) {
-        sharedPreferences.edit()
-            .putString(KEY_MASTER_PW_HASH, hash)
-            .putString(KEY_MASTER_PW_SALT, salt)
-            .apply()
+        sharedPreferences.edit {
+            putString(KEY_MASTER_PW_HASH, hash)
+                .putString(KEY_MASTER_PW_SALT, salt)
+        }
     }
 
     override fun getMasterPasswordHash(): String? {
@@ -152,18 +148,18 @@ class SecurePrefsImpl @Inject constructor(
     }
 
     override fun clearMasterPassword() {
-        sharedPreferences.edit()
-            .remove(KEY_MASTER_PW_HASH)
-            .remove(KEY_MASTER_PW_SALT)
-            .remove(KEY_AUTO_UNLOCK_SECRET)
-            .remove(KEY_BIOMETRIC_UNLOCK_SECRET)
-            .apply()
+        sharedPreferences.edit {
+            remove(KEY_MASTER_PW_HASH)
+                .remove(KEY_MASTER_PW_SALT)
+                .remove(KEY_AUTO_UNLOCK_SECRET)
+                .remove(KEY_BIOMETRIC_UNLOCK_SECRET)
+        }
     }
 
     override fun setAutoUnlockSecret(secret: String) {
-        sharedPreferences.edit()
-            .putString(KEY_AUTO_UNLOCK_SECRET, secret)
-            .apply()
+        sharedPreferences.edit {
+            putString(KEY_AUTO_UNLOCK_SECRET, secret)
+        }
     }
 
     override fun getAutoUnlockSecret(): String? {
@@ -242,5 +238,30 @@ class SecurePrefsImpl @Inject constructor(
         sharedPreferences.edit()
             .putBoolean(KEY_BIOMETRIC_UNLOCK, enabled)
             .apply()
+    }
+
+    private fun createEncryptedPrefs(context: Context): SharedPreferences {
+        return runCatching { buildEncryptedPrefs(context) }
+            .getOrElse { firstError ->
+                Log.w(TAG, "Encrypted prefs could not be opened. Clearing corrupted secure state.", firstError)
+                context.deleteSharedPreferences(PREFS_FILE_NAME)
+                context.deleteSharedPreferences(KEY_KEYSET_PREFS)
+                context.deleteSharedPreferences(VALUE_KEYSET_PREFS)
+                buildEncryptedPrefs(context)
+            }
+    }
+
+    private fun buildEncryptedPrefs(context: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+
+        return EncryptedSharedPreferences.create(
+            context,
+            PREFS_FILE_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
     }
 }
