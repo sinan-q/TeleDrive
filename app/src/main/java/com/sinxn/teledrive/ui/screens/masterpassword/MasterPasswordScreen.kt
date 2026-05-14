@@ -118,6 +118,7 @@ fun MasterPasswordScreen(
                     .setTitle("Unlock TeleDrive")
                     .setSubtitle("Authenticate to access your encrypted files")
                     .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    .setNegativeButtonText("Use Password")
                     .build()
 
                 if (cipher != null) {
