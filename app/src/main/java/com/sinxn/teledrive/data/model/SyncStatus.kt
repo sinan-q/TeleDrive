@@ -10,7 +10,9 @@ data class SyncMetrics(
     val messagesScanned: Int = 0,
     val totalDocumentsFound: Int = 0,
     val encFilesMatched: Int = 0,
-    val foundFilenames: List<String> = emptyList()
+    val foundFilenames: List<String> = emptyList(),
+    val additionalFiles: List<String> = emptyList(),
+    val deletedFiles: List<String> = emptyList()
 )
 
 sealed class SyncStatus {

@@ -28,7 +28,7 @@ class BackupManager @Inject constructor(
         ignoreUnknownKeys = true
     }
 
-    suspend fun exportBackup(context: Context, uri: Uri) {
+    suspend fun generateBackupJson(): String {
         val backup = BackupDocument(
             schemaVersion = 1,
             exportedAt = System.currentTimeMillis(),
@@ -40,16 +40,23 @@ class BackupManager @Inject constructor(
                 authOnLaunch = securePrefs.isAuthOnLaunchEnabled()
             )
         )
+        return json.encodeToString(backup)
+    }
 
+    suspend fun exportBackup(context: Context, uri: Uri) {
+        val jsonPayload = generateBackupJson()
         context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
-            writer.write(json.encodeToString(backup))
+            writer.write(jsonPayload)
         } ?: error("Could not open output stream")
     }
 
     suspend fun importBackup(context: Context, uri: Uri) {
         val payload = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             ?: error("Could not read backup file")
+        importFromBackupJson(payload)
+    }
 
+    suspend fun importFromBackupJson(payload: String) {
         val backup = json.decodeFromString<BackupDocument>(payload)
 
         appDatabase.withTransaction {

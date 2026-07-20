@@ -122,20 +122,33 @@ fun SyncProgressScreen(
                                     DetailRow("Documents Found", status.metrics.totalDocumentsFound.toString())
                                     DetailRow("Encrypted Matches", status.metrics.encFilesMatched.toString())
                                     
-                                    if (status.metrics.foundFilenames.isNotEmpty()) {
+                                    if (status.metrics.additionalFiles.isNotEmpty()) {
                                         Spacer(modifier = Modifier.height(12.dp))
-                                        Text("Filenames Seen:", style = MaterialTheme.typography.labelMedium)
-                                        status.metrics.foundFilenames.take(15).forEach { name ->
+                                        Text("Additional Files (in TG, not in DB):", style = MaterialTheme.typography.labelMedium)
+                                        status.metrics.additionalFiles.take(15).forEach { name ->
                                             Text(
                                                 text = "• $name",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = if (name.endsWith(".enc", ignoreCase = true)) 
-                                                    MaterialTheme.colorScheme.primary 
-                                                else MaterialTheme.colorScheme.outline
+                                                color = MaterialTheme.colorScheme.outline
                                             )
                                         }
-                                        if (status.metrics.foundFilenames.size > 15) {
-                                            Text("...and ${status.metrics.foundFilenames.size - 15} more", style = MaterialTheme.typography.labelSmall)
+                                        if (status.metrics.additionalFiles.size > 15) {
+                                            Text("...and ${status.metrics.additionalFiles.size - 15} more", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+
+                                    if (status.metrics.deletedFiles.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text("Deleted Files (in DB, not in TG):", style = MaterialTheme.typography.labelMedium)
+                                        status.metrics.deletedFiles.take(15).forEach { name ->
+                                            Text(
+                                                text = "• $name",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                        if (status.metrics.deletedFiles.size > 15) {
+                                            Text("...and ${status.metrics.deletedFiles.size - 15} more", style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
 

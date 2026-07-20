@@ -39,7 +39,8 @@ class FileRepositoryImpl @Inject constructor(
     private val fileDao: FileDao,
     private val telegramClient: TelegramClient,
     private val securePrefs: SecurePrefs,
-    private val fileCryptor: FileCryptor
+    private val fileCryptor: FileCryptor,
+    private val metadataManager: MetadataManager
 ) : FileRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -507,14 +508,43 @@ class FileRepositoryImpl @Inject constructor(
                 chat.id
             }
 
-            Log.d("FileRepositoryImpl", "Starting existing files sync for chat $targetChatId")
-            
-            // Ensure chat is opened so TDLib syncs it from server
+            Log.d("FileRepositoryImpl", "Starting metadata sync for chat $targetChatId")
             telegramClient.send(TdApi.OpenChat(targetChatId))
 
-            var lastMsgId = 0L
+            val firstMessage = metadataManager.fetchFirstMessage(targetChatId)
+
+            if (firstMessage == null) {
+                // Empty chat, initialize vault
+                Log.d("FileRepositoryImpl", "Chat is empty. Initializing new vault.")
+                metadataManager.initializeMetadataMessage(targetChatId)
+                _syncStatus.value = SyncStatus.Completed(currentMetrics)
+                return
+            }
+
+            val content = firstMessage.content
+            if (content !is TdApi.MessageDocument || content.caption.text != MetadataManager.METADATA_CAPTION) {
+                _syncStatus.value = SyncStatus.Error("This chat is not a valid TeleDrive vault (Metadata missing).")
+                return
+            }
+
+            // Valid vault, attempt download & decryption
+            Log.d("FileRepositoryImpl", "Found metadata message. Downloading and decrypting...")
+            val fileId = content.document.document.id
             
-            // Loop to fetch history in batches of 100
+            // This blocks until downloaded and throws if password wrong (AEADBadTagException)
+            val jsonPayload = metadataManager.downloadMetadataFileBlocking(fileId)
+            
+            Log.d("FileRepositoryImpl", "Decryption successful. Loading database.")
+            metadataManager.importMetadata(jsonPayload)
+
+            // Step 5: Read-Only Reconciliation (Scan chat for additional/deleted files)
+            var lastMsgId = 0L
+            val additionalFiles = mutableListOf<String>()
+            
+            // Track all message IDs in the database to find which are missing from Telegram
+            val allFiles = fileDao.getAllFiles()
+            val pendingDbMessageIds = allFiles.mapNotNull { it.messageId }.toMutableSet()
+            
             while (true) {
                 val searchResult = telegramClient.send(
                     TdApi.SearchChatMessages(targetChatId, null, "", null, lastMsgId, 0, 100, TdApi.SearchMessagesFilterDocument())
@@ -528,34 +558,44 @@ class FileRepositoryImpl @Inject constructor(
                 
                 if (messages.isEmpty()) break
                 
-                // Track metrics
                 val scannedBatch = messages.size
+                currentMetrics = currentMetrics.copy(messagesScanned = currentMetrics.messagesScanned + scannedBatch)
+                _syncStatus.value = SyncStatus.Syncing(currentMetrics)
+                
+                // Reconcile logic (Just tracking metrics and logging for now to show on UI later)
                 val docsInBatch = messages.filter { it.content is TdApi.MessageDocument }
-                val filenamesInBatch = docsInBatch.mapNotNull { 
-                    (it.content as TdApi.MessageDocument).document.fileName.takeIf { name -> name.isNotBlank() }
-                }
-                val entitiesToInsert = messages.mapNotNull { it.toFileEntity(userId) }
-                
-                currentMetrics = currentMetrics.copy(
-                    messagesScanned = currentMetrics.messagesScanned + scannedBatch,
-                    totalDocumentsFound = currentMetrics.totalDocumentsFound + docsInBatch.size,
-                    encFilesMatched = currentMetrics.encFilesMatched + entitiesToInsert.size,
-                    foundFilenames = currentMetrics.foundFilenames + filenamesInBatch
-                )
-                
-                if (entitiesToInsert.isNotEmpty()) {
-                    fileDao.insertFiles(entitiesToInsert)
-                    _syncStatus.value = SyncStatus.Syncing(currentMetrics)
+                for (msg in docsInBatch) {
+                    if (msg.id != firstMessage.id) {
+                        val msgIdStr = msg.id.toString()
+                        pendingDbMessageIds.remove(msgIdStr)
+                        // Check if it's in our DB
+                        val exists = fileDao.getFileByMessageId(msgIdStr) != null
+                        if (!exists) {
+                            val fileName = (msg.content as TdApi.MessageDocument).document.fileName
+                            additionalFiles.add(fileName)
+                        }
+                    }
                 }
                 
                 lastMsgId = messages.last().id
                 if (messages.size < 100) break
             }
             
-            Log.d("FileRepositoryImpl", "Sync completed. Metrics: $currentMetrics")
+            // Any message IDs left in pendingDbMessageIds are deleted from TG
+            val deletedFiles = allFiles
+                .filter { pendingDbMessageIds.contains(it.messageId) }
+                .map { it.name }
+                
+            currentMetrics = currentMetrics.copy(
+                additionalFiles = additionalFiles,
+                deletedFiles = deletedFiles
+            )
+            
+            Log.d("FileRepositoryImpl", "Sync completed. Additional orphaned files in chat: ${additionalFiles.size}, Deleted from TG: ${deletedFiles.size}")
             _syncStatus.value = SyncStatus.Completed(currentMetrics)
+            
         } catch (e: Exception) {
-            Log.e("FileRepositoryImpl", "Error syncing existing files", e)
+            Log.e("FileRepositoryImpl", "Error syncing metadata", e)
             _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during sync")
         }
     }
