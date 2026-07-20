@@ -114,4 +114,26 @@ interface FileDao {
 
     @Query("DELETE FROM files")
     suspend fun deleteAllFiles()
+
+    // ── Snapshot queries for DocumentsProvider (non-Flow) ───────────
+
+    /** One-shot list of children in a folder (null parentId = root). Used by SAF. */
+    @Query("""
+        SELECT * FROM files 
+        WHERE parent_id IS :parentId 
+          AND deleted_at IS NULL 
+          AND user_id = :userId
+        ORDER BY type DESC, name ASC
+    """)
+    suspend fun getFilesByParentSnapshot(parentId: String?, userId: String): List<FileEntity>
+
+    /** One-shot search by name. Used by SAF querySearchDocuments. */
+    @Query("""
+        SELECT * FROM files 
+        WHERE name LIKE '%' || :query || '%' 
+          AND deleted_at IS NULL 
+          AND user_id = :userId
+        ORDER BY name ASC
+    """)
+    suspend fun searchFilesSnapshot(query: String, userId: String): List<FileEntity>
 }
