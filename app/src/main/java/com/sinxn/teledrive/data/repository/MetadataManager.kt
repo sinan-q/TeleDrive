@@ -173,13 +173,6 @@ class MetadataManager @Inject constructor(
         return payload
     }
 
-    /**
-     * Alias for findMetadataMessage for backward compatibility.
-     */
-    suspend fun fetchFirstMessage(chatId: Long): TdApi.Message? {
-        return findMetadataMessage(chatId)
-    }
-
     suspend fun validateStorageChat(chatId: Long): StorageValidation {
         val chatObj = telegramClient.send(TdApi.GetChat(chatId))
         if (chatObj is TdApi.Chat) {
@@ -240,7 +233,7 @@ class MetadataManager @Inject constructor(
     suspend fun verifyVaultPassword(chatId: Long, candidatePassword: String): Boolean {
         return try {
             val fileBytes = cachedEncryptedBytes ?: run {
-                val firstMessage = fetchFirstMessage(chatId) ?: return false
+                val firstMessage = findMetadataMessage(chatId) ?: return false
                 val content = firstMessage.content as? TdApi.MessageDocument ?: return false
                 val fileId = content.document.document.id
 

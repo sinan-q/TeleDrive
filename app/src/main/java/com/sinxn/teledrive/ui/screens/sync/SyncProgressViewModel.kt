@@ -30,4 +30,13 @@ class SyncProgressViewModel @Inject constructor(
             }
         }
     }
+
+    fun crossVerify() {
+        val userId = securePrefs.getUserId()
+        if (userId != null) {
+            viewModelScope.launch {
+                fileRepository.crossVerifyVault(userId)
+            }
+        }
+    }
 }

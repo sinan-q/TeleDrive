@@ -66,10 +66,15 @@ interface FileRepository {
     suspend fun getFolders(userId: String): List<FileEntity>
 
     /**
-     * Scans the Telegram chat history for existing encrypted (.enc) files
-     * and adds them to the local database.
+     * Downloads and imports existing metadata into Room database.
      */
     suspend fun syncExistingFiles(userId: String)
+
+    /**
+     * Performs Step 5 read-only reconciliation scanning Telegram chat history
+     * to cross-verify local database against Telegram storage.
+     */
+    suspend fun crossVerifyVault(userId: String)
 
     /**
      * Sends the initial empty encrypted metadata payload to Telegram to

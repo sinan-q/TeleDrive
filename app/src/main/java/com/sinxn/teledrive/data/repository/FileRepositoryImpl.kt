@@ -583,39 +583,73 @@ class FileRepositoryImpl @Inject constructor(
                 metadataManager.importMetadata(jsonPayload)
             }
 
-            // Step 5: Read-Only Reconciliation (Scan chat for additional/deleted files)
+            // Calculate files & folders imported from metadata
+            val allFiles = fileDao.getAllFiles()
+            val fileCount = allFiles.count { it.type != "folder" }
+            val folderCount = allFiles.count { it.type == "folder" }
+
+            currentMetrics = currentMetrics.copy(
+                filesImported = fileCount,
+                foldersImported = folderCount
+            )
+
+            Log.d("FileRepositoryImpl", "Metadata import complete: $fileCount files, $folderCount folders.")
+            _syncStatus.value = SyncStatus.MetadataImported(currentMetrics)
+
+        } catch (e: Exception) {
+            Log.e("FileRepositoryImpl", "Error syncing metadata", e)
+            _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during sync")
+        }
+    }
+
+    override suspend fun crossVerifyVault(userId: String) {
+        try {
+            val targetChatId = securePrefs.getStorageChannelId()
+            if (targetChatId == null) {
+                _syncStatus.value = SyncStatus.Error("No storage location selected.")
+                return
+            }
+
+            val currentStatus = _syncStatus.value
+            val initialMetrics = when (currentStatus) {
+                is SyncStatus.MetadataImported -> currentStatus.metrics
+                is SyncStatus.Syncing -> currentStatus.metrics
+                is SyncStatus.Completed -> currentStatus.metrics
+                else -> com.sinxn.teledrive.data.model.SyncMetrics()
+            }
+
+            var currentMetrics = initialMetrics.copy(messagesScanned = 0)
+            _syncStatus.value = SyncStatus.Reconciling(currentMetrics)
+
             var lastMsgId = 0L
             val additionalFiles = mutableListOf<String>()
             val metadataMessageId = securePrefs.getMetadataMessageId() ?: metadataManager.getCachedMetadataMessageId()
-            
-            // Track all message IDs in the database to find which are missing from Telegram
+
             val allFiles = fileDao.getAllFiles()
             val pendingDbMessageIds = allFiles.mapNotNull { it.messageId }.toMutableSet()
-            
+
             while (true) {
                 val searchResult = telegramClient.send(
                     TdApi.SearchChatMessages(targetChatId, null, "", null, lastMsgId, 0, 100, TdApi.SearchMessagesFilterDocument())
                 )
-                
+
                 val messages = when (searchResult) {
                     is TdApi.Messages -> searchResult.messages
                     is TdApi.FoundChatMessages -> searchResult.messages
                     else -> break
                 }
-                
+
                 if (messages.isEmpty()) break
-                
+
                 val scannedBatch = messages.size
                 currentMetrics = currentMetrics.copy(messagesScanned = currentMetrics.messagesScanned + scannedBatch)
-                _syncStatus.value = SyncStatus.Syncing(currentMetrics)
-                
-                // Reconcile logic (Just tracking metrics and logging for now to show on UI later)
+                _syncStatus.value = SyncStatus.Reconciling(currentMetrics)
+
                 val docsInBatch = messages.filter { it.content is TdApi.MessageDocument }
                 for (msg in docsInBatch) {
                     if (msg.id != metadataMessageId) {
                         val msgIdStr = msg.id.toString()
                         pendingDbMessageIds.remove(msgIdStr)
-                        // Check if it's in our DB
                         val exists = fileDao.getFileByMessageId(msgIdStr) != null
                         if (!exists) {
                             val fileName = (msg.content as TdApi.MessageDocument).document.fileName
@@ -623,27 +657,26 @@ class FileRepositoryImpl @Inject constructor(
                         }
                     }
                 }
-                
+
                 lastMsgId = messages.last().id
                 if (messages.size < 100) break
             }
-            
-            // Any message IDs left in pendingDbMessageIds are deleted from TG
+
             val deletedFiles = allFiles
                 .filter { pendingDbMessageIds.contains(it.messageId) }
                 .map { it.name }
-                
+
             currentMetrics = currentMetrics.copy(
                 additionalFiles = additionalFiles,
                 deletedFiles = deletedFiles
             )
-            
-            Log.d("FileRepositoryImpl", "Sync completed. Additional orphaned files in chat: ${additionalFiles.size}, Deleted from TG: ${deletedFiles.size}")
+
+            Log.d("FileRepositoryImpl", "Cross verification completed. Additional orphaned files in chat: ${additionalFiles.size}, Deleted from TG: ${deletedFiles.size}")
             _syncStatus.value = SyncStatus.Completed(currentMetrics)
-            
+
         } catch (e: Exception) {
-            Log.e("FileRepositoryImpl", "Error syncing metadata", e)
-            _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during sync")
+            Log.e("FileRepositoryImpl", "Error during cross verification", e)
+            _syncStatus.value = SyncStatus.Error(e.message ?: "Unknown error during cross verification")
         }
     }
 

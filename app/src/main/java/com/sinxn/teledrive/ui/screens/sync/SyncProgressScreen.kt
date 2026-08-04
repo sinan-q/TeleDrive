@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,25 +61,92 @@ fun SyncProgressScreen(
                             )
                             Spacer(modifier = Modifier.height(24.dp))
                             Text(
-                                text = "Syncing Existing Files...",
+                                text = "Importing Vault Metadata...",
                                 style = MaterialTheme.typography.titleLarge
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            val metrics = if (status is SyncStatus.Syncing) status.metrics else com.sinxn.teledrive.data.model.SyncMetrics()
                             Text(
-                                text = "Found and imported ${metrics.encFilesMatched} items",
+                                text = "Please wait while we load your encrypted drive metadata.",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+
+                    is SyncStatus.MetadataImported -> {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Metadata Imported",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(64.dp)
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(
+                                text = "Metadata Imported!",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Your vault layout has been successfully restored from your storage channel.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Imported Vault Summary", style = MaterialTheme.typography.labelLarge)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    DetailRow("Files Restored", status.metrics.filesImported.toString())
+                                    DetailRow("Folders Restored", status.metrics.foldersImported.toString())
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(32.dp))
+                            Button(
+                                onClick = onContinue,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Continue to App")
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = { viewModel.crossVerify() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Cross-Verify with Telegram Storage")
+                            }
+                        }
+                    }
+
+                    is SyncStatus.Reconciling -> {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(64.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(
+                                text = "Cross-Verifying with Telegram...",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Scanned ${status.metrics.messagesScanned} messages...",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Scanned ${metrics.messagesScanned} messages...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "Please wait while we scan your Telegram storage history. This may take a moment depending on your library size.",
+                                text = "Scanning chat history to find any orphaned files or missing uploads.",
                                 style = MaterialTheme.typography.bodySmall,
                                 textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.outline
@@ -90,24 +158,24 @@ fun SyncProgressScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Sync Complete",
+                                contentDescription = "Verification Complete",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(64.dp)
                             )
                             Spacer(modifier = Modifier.height(24.dp))
                             Text(
-                                text = "Sync Complete!",
+                                text = "Verification Complete!",
                                 style = MaterialTheme.typography.titleLarge
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Successfully imported ${status.metrics.encFilesMatched} encrypted files from your storage.",
+                                text = "Telegram storage cross-verification complete.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(16.dp))
-                            
+
                             // Diagnostic stats
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -119,12 +187,12 @@ fun SyncProgressScreen(
                                     Text("Diagnostic Info", style = MaterialTheme.typography.labelLarge)
                                     Spacer(modifier = Modifier.height(8.dp))
                                     DetailRow("Messages Scanned", status.metrics.messagesScanned.toString())
-                                    DetailRow("Documents Found", status.metrics.totalDocumentsFound.toString())
-                                    DetailRow("Encrypted Matches", status.metrics.encFilesMatched.toString())
-                                    
+                                    DetailRow("Files Restored", status.metrics.filesImported.toString())
+                                    DetailRow("Folders Restored", status.metrics.foldersImported.toString())
+
                                     if (status.metrics.additionalFiles.isNotEmpty()) {
                                         Spacer(modifier = Modifier.height(12.dp))
-                                        Text("Additional Files (in TG, not in DB):", style = MaterialTheme.typography.labelMedium)
+                                        Text("Orphaned Files (in TG, not in Metadata):", style = MaterialTheme.typography.labelMedium)
                                         status.metrics.additionalFiles.take(15).forEach { name ->
                                             Text(
                                                 text = "• $name",
@@ -139,7 +207,7 @@ fun SyncProgressScreen(
 
                                     if (status.metrics.deletedFiles.isNotEmpty()) {
                                         Spacer(modifier = Modifier.height(12.dp))
-                                        Text("Deleted Files (in DB, not in TG):", style = MaterialTheme.typography.labelMedium)
+                                        Text("Deleted Files (in Metadata, not in TG):", style = MaterialTheme.typography.labelMedium)
                                         status.metrics.deletedFiles.take(15).forEach { name ->
                                             Text(
                                                 text = "• $name",
@@ -151,19 +219,9 @@ fun SyncProgressScreen(
                                             Text("...and ${status.metrics.deletedFiles.size - 15} more", style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
-
-                                    if (status.metrics.totalDocumentsFound > status.metrics.encFilesMatched) {
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Text(
-                                            text = "Note: ${status.metrics.totalDocumentsFound - status.metrics.encFilesMatched} documents were skipped because they don't have the .enc extension.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.error,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-                                        )
-                                    }
                                 }
                             }
-                            
+
                             Spacer(modifier = Modifier.height(32.dp))
                             Button(
                                 onClick = onContinue,
