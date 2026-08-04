@@ -30,6 +30,7 @@ class BackupManager @Inject constructor(
 
     suspend fun generateBackupJson(): String {
         val backup = BackupDocument(
+            magicHeader = "TELEDRIVE_VAULT_V1",
             schemaVersion = 1,
             exportedAt = System.currentTimeMillis(),
             users = userDao.getAllUsers().map(UserEntity::toBackup),
@@ -58,6 +59,7 @@ class BackupManager @Inject constructor(
 
     suspend fun importFromBackupJson(payload: String) {
         val backup = json.decodeFromString<BackupDocument>(payload)
+        require(backup.magicHeader == "TELEDRIVE_VAULT_V1") { "Invalid TeleDrive vault payload signature" }
 
         appDatabase.withTransaction {
             fileDao.deleteAllFiles()
@@ -89,6 +91,7 @@ class BackupManager @Inject constructor(
 
 @Serializable
 data class BackupDocument(
+    val magicHeader: String = "TELEDRIVE_VAULT_V1",
     val schemaVersion: Int,
     val exportedAt: Long,
     val users: List<BackupUser>,

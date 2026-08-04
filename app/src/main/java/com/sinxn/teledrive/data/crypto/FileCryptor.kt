@@ -192,7 +192,10 @@ class FileCryptor @Inject constructor(
      */
     fun decryptBytes(encrypted: ByteArray): ByteArray {
         val password = encryptionManager.getSessionPassword()
+        return decryptBytesWithPassword(encrypted, password)
+    }
 
+    fun decryptBytesWithPassword(encrypted: ByteArray, password: String): ByteArray {
         val salt = encrypted.copyOfRange(0, SALT_LENGTH_BYTES)
         val iv = encrypted.copyOfRange(SALT_LENGTH_BYTES, HEADER_SIZE)
         val ciphertext = encrypted.copyOfRange(HEADER_SIZE, encrypted.size)

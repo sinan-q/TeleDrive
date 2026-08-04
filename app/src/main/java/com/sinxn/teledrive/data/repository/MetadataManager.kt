@@ -147,6 +147,24 @@ class MetadataManager @Inject constructor(
         return validateStorageChat(chatId) is StorageValidation.ExistingVault
     }
 
+    suspend fun verifyVaultPassword(chatId: Long, candidatePassword: String): Boolean {
+        return try {
+            val firstMessage = fetchFirstMessage(chatId) ?: return false
+            val content = firstMessage.content as? TdApi.MessageDocument ?: return false
+            val fileId = content.document.document.id
+
+            val result = telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, true))
+            if (result !is TdApi.File || result.local.path.isEmpty()) return false
+
+            val fileBytes = File(result.local.path).readBytes()
+            val decryptedBytes = fileCryptor.decryptBytesWithPassword(fileBytes, candidatePassword)
+            val jsonString = String(decryptedBytes, Charsets.UTF_8)
+            jsonString.contains("TELEDRIVE_VAULT_V1")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /**
      * Imports the decrypted metadata payload into the Room Database
      */

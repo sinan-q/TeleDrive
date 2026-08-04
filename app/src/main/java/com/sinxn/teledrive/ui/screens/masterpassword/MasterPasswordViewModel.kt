@@ -35,6 +35,8 @@ class MasterPasswordViewModel @Inject constructor(
     private val encryptionManager: EncryptionManager,
     private val securePrefs: SecurePrefs,
     private val fileRepository: FileRepository,
+    private val metadataManager: com.sinxn.teledrive.data.repository.MetadataManager,
+    private val telegramClient: com.sinxn.teledrive.data.telegram.TelegramClient,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -63,34 +65,55 @@ class MasterPasswordViewModel @Inject constructor(
             _uiState.value = MasterPasswordUiState.Error("Password must be at least 4 characters")
             return
         }
-        if (password != confirmPassword) {
+        if (!isSyncMode && password != confirmPassword) {
             _uiState.value = MasterPasswordUiState.Error("Passwords do not match")
             return
         }
 
         _uiState.value = MasterPasswordUiState.Deriving
-        try {
-            if (isSyncMode) {
-                // Sync mode: set the password without local verification check
-                // (password will be verified implicitly when first file is decrypted)
-                encryptionManager.setSyncPassword(password)
-            } else {
-                encryptionManager.setupPassword(password)
-            }
-            persistAutoUnlockSecret(password)
-            _uiState.value = MasterPasswordUiState.Unlocked
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                if (isSyncMode) {
+                    val configuredChatId = securePrefs.getStorageChannelId()
+                    val targetChatId = if (configuredChatId != null) {
+                        configuredChatId
+                    } else {
+                        val activeUserId = securePrefs.getUserId()
+                        if (activeUserId != null) {
+                            val chat = telegramClient.send(
+                                org.drinkless.tdlib.TdApi.CreatePrivateChat(activeUserId.toLong(), true)
+                            ) as? org.drinkless.tdlib.TdApi.Chat
+                            chat?.id
+                        } else null
+                    }
 
-            // For new vaults (non-sync), immediately upload the initial empty metadata
-            // to Telegram so other devices can detect the vault exists.
-            if (!isSyncMode) {
-                viewModelScope.launch {
+                    if (targetChatId == null) {
+                        _uiState.value = MasterPasswordUiState.Error("Could not resolve storage chat")
+                        return@launch
+                    }
+
+                    val isValidPassword = metadataManager.verifyVaultPassword(targetChatId, password)
+                    if (!isValidPassword) {
+                        _uiState.value = MasterPasswordUiState.Error("Incorrect master password for this vault. Please try again.")
+                        return@launch
+                    }
+
+                    encryptionManager.setSyncPassword(password)
+                } else {
+                    encryptionManager.setupPassword(password)
+                }
+
+                persistAutoUnlockSecret(password)
+                _uiState.value = MasterPasswordUiState.Unlocked
+
+                if (!isSyncMode) {
                     securePrefs.getUserId()?.let { userId ->
                         fileRepository.initializeVault(userId)
                     }
                 }
+            } catch (e: Exception) {
+                _uiState.value = MasterPasswordUiState.Error("Failed to set up encryption: ${e.message}")
             }
-        } catch (e: Exception) {
-            _uiState.value = MasterPasswordUiState.Error("Failed to set up encryption: ${e.message}")
         }
     }
 
