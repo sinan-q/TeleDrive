@@ -33,7 +33,9 @@ class SettingsViewModel @Inject constructor(
     private val biometricPasswordStore: BiometricPasswordStore,
     private val fileRepository: FileRepository,
     private val userRepository: UserRepository,
-    private val authManager: AuthManager
+    private val authManager: AuthManager,
+    private val fileDao: com.sinxn.teledrive.data.local.dao.FileDao,
+    private val userDao: com.sinxn.teledrive.data.local.dao.UserDao
 ) : ViewModel() {
     private var fileFolderSummaryJob: Job? = null
 
@@ -220,9 +222,17 @@ class SettingsViewModel @Inject constructor(
         _authOnLaunch.value = false
         securePrefs.setStorageChannelId(null)
         securePrefs.setStorageChannelName(null)
+        securePrefs.setMetadataMessageId(null)
+        encryptionManager.lock()
         _selectedChannelName.value = "Saved Messages"
         _selectedChannelKind.value = StorageLocationKind.SavedMessages
-        authManager.logout()
+
+        viewModelScope.launch {
+            fileDao.deleteAllFiles()
+            userDao.deleteAllUsers()
+            securePrefs.clearUserId()
+            authManager.logout()
+        }
     }
 
     private fun observeProfilePhotoUpdates() {
