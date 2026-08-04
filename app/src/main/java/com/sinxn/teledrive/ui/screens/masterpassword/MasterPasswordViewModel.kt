@@ -79,6 +79,16 @@ class MasterPasswordViewModel @Inject constructor(
             }
             persistAutoUnlockSecret(password)
             _uiState.value = MasterPasswordUiState.Unlocked
+
+            // For new vaults (non-sync), immediately upload the initial empty metadata
+            // to Telegram so other devices can detect the vault exists.
+            if (!isSyncMode) {
+                viewModelScope.launch {
+                    securePrefs.getUserId()?.let { userId ->
+                        fileRepository.initializeVault(userId)
+                    }
+                }
+            }
         } catch (e: Exception) {
             _uiState.value = MasterPasswordUiState.Error("Failed to set up encryption: ${e.message}")
         }

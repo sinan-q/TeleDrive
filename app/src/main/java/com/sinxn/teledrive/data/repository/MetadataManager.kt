@@ -7,6 +7,7 @@ import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.drinkless.tdlib.TdApi
+import kotlinx.coroutines.delay
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -78,7 +79,38 @@ class MetadataManager @Inject constructor(
         tempFile.delete()
         
         if (result is TdApi.Error) {
-            Log.e("MetadataManager", "Failed to update metadata message $messageId: ${result.message}")
+            if (result.code == 420) {
+                // FLOOD_WAIT: parse wait time from error message and retry once
+                val waitSeconds = result.message
+                    .substringAfter("FLOOD_WAIT_", "5")
+                    .toIntOrNull() ?: 5
+                Log.w("MetadataManager", "FLOOD_WAIT_$waitSeconds for message $messageId, retrying after delay...")
+                delay((waitSeconds * 1000L) + 500L)
+
+                // Re-generate with latest DB state (may have changed during wait)
+                val retryJson = backupManager.generateBackupJson()
+                val retryEncrypted = fileCryptor.encryptBytes(retryJson.toByteArray(Charsets.UTF_8))
+                val retryFile = File(context.cacheDir, "metadata_retry_${System.currentTimeMillis()}.enc")
+                retryFile.writeBytes(retryEncrypted)
+
+                val retryContent = TdApi.InputMessageDocument(
+                    TdApi.InputFileLocal(retryFile.absolutePath),
+                    null,
+                    false,
+                    TdApi.FormattedText(METADATA_CAPTION, emptyArray())
+                )
+
+                val retryResult = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, retryContent))
+                retryFile.delete()
+
+                if (retryResult is TdApi.Error) {
+                    Log.e("MetadataManager", "Retry failed for metadata message $messageId: ${retryResult.message}")
+                } else {
+                    Log.d("MetadataManager", "Successfully updated metadata message $messageId after FLOOD_WAIT retry")
+                }
+            } else {
+                Log.e("MetadataManager", "Failed to update metadata message $messageId: ${result.message}")
+            }
         } else {
             Log.d("MetadataManager", "Successfully updated metadata message $messageId")
         }
@@ -99,6 +131,20 @@ class MetadataManager @Inject constructor(
         } else {
             null
         }
+    }
+
+    suspend fun validateStorageChat(chatId: Long): StorageValidation {
+        val firstMessage = fetchFirstMessage(chatId) ?: return StorageValidation.Empty
+        val content = firstMessage.content
+        return if (content is TdApi.MessageDocument && content.caption.text == METADATA_CAPTION) {
+            StorageValidation.ExistingVault
+        } else {
+            StorageValidation.Invalid
+        }
+    }
+
+    suspend fun hasExistingVault(chatId: Long): Boolean {
+        return validateStorageChat(chatId) is StorageValidation.ExistingVault
     }
 
     /**
@@ -127,4 +173,10 @@ class MetadataManager @Inject constructor(
             error("Failed to download metadata file: ${result.javaClass.simpleName}")
         }
     }
+}
+
+sealed interface StorageValidation {
+    data object Empty : StorageValidation
+    data object ExistingVault : StorageValidation
+    data object Invalid : StorageValidation
 }

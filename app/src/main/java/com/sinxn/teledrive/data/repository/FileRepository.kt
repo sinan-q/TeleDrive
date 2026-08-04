@@ -72,6 +72,13 @@ interface FileRepository {
     suspend fun syncExistingFiles(userId: String)
 
     /**
+     * Sends the initial empty encrypted metadata payload to Telegram to
+     * establish the vault marker (#teledrive_vault_metadata).
+     * Must be called once when a new vault is created (non-sync setup).
+     */
+    suspend fun initializeVault(userId: String)
+
+    /**
      * Observable flow of the current sync status.
      */
     val syncStatus: StateFlow<SyncStatus>

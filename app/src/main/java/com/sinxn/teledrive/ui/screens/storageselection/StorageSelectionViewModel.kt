@@ -15,8 +15,44 @@ import javax.inject.Inject
 @HiltViewModel
 class StorageSelectionViewModel @Inject constructor(
     private val securePrefs: SecurePrefs,
-    private val telegramClient: TelegramClient
+    private val telegramClient: TelegramClient,
+    private val metadataManager: com.sinxn.teledrive.data.repository.MetadataManager
 ) : ViewModel() {
+
+    fun validateStorageLocation(onResult: (com.sinxn.teledrive.data.repository.StorageValidation) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val configuredChatId = selectedChannelId
+                val targetChatId = if (configuredChatId != null) {
+                    configuredChatId
+                } else {
+                    val activeUserId = securePrefs.getUserId()
+                    if (activeUserId != null) {
+                        val chat = telegramClient.send(
+                            TdApi.CreatePrivateChat(activeUserId.toLong(), true)
+                        ) as? TdApi.Chat
+                        chat?.id
+                    } else null
+                }
+
+                if (targetChatId == null) {
+                    onResult(com.sinxn.teledrive.data.repository.StorageValidation.Invalid)
+                    return@launch
+                }
+
+                val validation = metadataManager.validateStorageChat(targetChatId)
+                onResult(validation)
+            } catch (e: Exception) {
+                onResult(com.sinxn.teledrive.data.repository.StorageValidation.Invalid)
+            }
+        }
+    }
+
+    fun checkHasVault(onResult: (Boolean) -> Unit) {
+        validateStorageLocation { validation ->
+            onResult(validation is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault)
+        }
+    }
 
     private val selectedChannelId: Long?
         get() = securePrefs.getStorageChannelId()
@@ -142,6 +178,7 @@ class StorageSelectionViewModel @Inject constructor(
     }
 
     fun selectChannel(id: Long, title: String, kind: StorageLocationKind) {
+        securePrefs.setMetadataMessageId(null)
         if (id == 0L) {
             securePrefs.setStorageChannelId(null)
             securePrefs.setStorageChannelName(null)

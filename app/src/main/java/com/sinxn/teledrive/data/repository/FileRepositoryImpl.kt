@@ -12,6 +12,7 @@ import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
@@ -19,12 +20,16 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.sinxn.teledrive.data.model.SyncStatus
 import org.drinkless.tdlib.TdApi
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -66,6 +71,14 @@ class FileRepositoryImpl @Inject constructor(
     data class UploadMeta(val originalName: String, val mimeType: String?)
     private val pendingUploadMeta =
         java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue<UploadMeta>>()
+
+    private val metadataMutex = Mutex()
+
+    /** Debounced channel for metadata save requests to avoid Telegram FLOOD_WAIT */
+    private val metadataSaveRequest = MutableSharedFlow<String>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
 
     init {
         scope.launch {
@@ -174,10 +187,24 @@ class FileRepositoryImpl @Inject constructor(
                             // Delete the temporary record and insert the final one
                             fileDao.hardDeleteFile(oldId)
                             fileDao.insertFile(cleanEntity)
+                            saveMetadataRemote(activeUserId)
                         }
                     }
                 }
             }
+        }
+    }
+
+    init {
+        // Debounced metadata sync: coalesces rapid save requests and waits 2s
+        // after the last change before uploading to Telegram.
+        @OptIn(FlowPreview::class)
+        scope.launch {
+            metadataSaveRequest
+                .debounce(2_000L)
+                .collect { userId ->
+                    performMetadataSave(userId)
+                }
         }
     }
 
@@ -206,16 +233,16 @@ class FileRepositoryImpl @Inject constructor(
             aggregatedFiles
         }
 
-
-
     override suspend fun getFileById(id: String): FileEntity? =
         fileDao.getFileById(id)
 
     override suspend fun getFileByMessageId(messageId: String): FileEntity? =
         fileDao.getFileByMessageId(messageId)
 
-    override suspend fun saveFile(file: FileEntity) =
+    override suspend fun saveFile(file: FileEntity) {
         fileDao.insertFile(file)
+        saveMetadataRemote(file.userId)
+    }
 
     override suspend fun saveFiles(files: List<FileEntity>) =
         fileDao.insertFiles(files)
@@ -253,6 +280,7 @@ class FileRepositoryImpl @Inject constructor(
         }
         // Hard-delete from Room regardless
         fileDao.hardDeleteFile(file.id)
+        saveMetadataRemote(file.userId)
     }
 
     override fun searchFiles(query: String, userId: String): Flow<List<FileEntity>> =
@@ -484,14 +512,31 @@ class FileRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun renameFile(id: String, newName: String) =
+    override suspend fun renameFile(id: String, newName: String) {
         fileDao.renameFile(id, newName)
+        securePrefs.getUserId()?.let { saveMetadataRemote(it) }
+    }
 
-    override suspend fun moveFile(id: String, newParentId: String?) =
+    override suspend fun moveFile(id: String, newParentId: String?) {
         fileDao.moveFile(id, newParentId)
+        securePrefs.getUserId()?.let { saveMetadataRemote(it) }
+    }
 
     override suspend fun getFolders(userId: String): List<FileEntity> =
         fileDao.getFoldersByUser(userId)
+
+    override suspend fun initializeVault(userId: String) {
+        metadataMutex.withLock {
+            try {
+                val chatId = resolveTargetChatId(userId)
+                val newMsgId = metadataManager.initializeMetadataMessage(chatId)
+                securePrefs.setMetadataMessageId(newMsgId)
+                Log.d("FileRepositoryImpl", "Vault initialized with metadata message ID: $newMsgId")
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Failed to initialize vault metadata", e)
+            }
+        }
+    }
 
     override suspend fun syncExistingFiles(userId: String) {
         try {
@@ -516,7 +561,8 @@ class FileRepositoryImpl @Inject constructor(
             if (firstMessage == null) {
                 // Empty chat, initialize vault
                 Log.d("FileRepositoryImpl", "Chat is empty. Initializing new vault.")
-                metadataManager.initializeMetadataMessage(targetChatId)
+                val newMsgId = metadataManager.initializeMetadataMessage(targetChatId)
+                securePrefs.setMetadataMessageId(newMsgId)
                 _syncStatus.value = SyncStatus.Completed(currentMetrics)
                 return
             }
@@ -530,6 +576,7 @@ class FileRepositoryImpl @Inject constructor(
             // Valid vault, attempt download & decryption
             Log.d("FileRepositoryImpl", "Found metadata message. Downloading and decrypting...")
             val fileId = content.document.document.id
+            securePrefs.setMetadataMessageId(firstMessage.id)
             
             // This blocks until downloaded and throws if password wrong (AEADBadTagException)
             val jsonPayload = metadataManager.downloadMetadataFileBlocking(fileId)
@@ -756,5 +803,44 @@ class FileRepositoryImpl @Inject constructor(
             }
         }
         return bytesRead
+    }
+
+    /**
+     * Performs the actual metadata save to Telegram.
+     * Called by the debounced collector, NOT directly by callers.
+     */
+    private suspend fun performMetadataSave(userId: String) {
+        metadataMutex.withLock {
+            try {
+                val chatId = resolveTargetChatId(userId)
+                var messageId = securePrefs.getMetadataMessageId()
+                
+                if (messageId == null || messageId == 0L) {
+                    val firstMsg = metadataManager.fetchFirstMessage(chatId)
+                    if (firstMsg != null && firstMsg.content is TdApi.MessageDocument && 
+                        (firstMsg.content as TdApi.MessageDocument).caption.text == MetadataManager.METADATA_CAPTION) {
+                        messageId = firstMsg.id
+                        securePrefs.setMetadataMessageId(messageId)
+                    }
+                }
+                
+                if (messageId != null && messageId != 0L) {
+                    metadataManager.updateMetadataMessage(chatId, messageId)
+                } else {
+                    val newMsgId = metadataManager.initializeMetadataMessage(chatId)
+                    securePrefs.setMetadataMessageId(newMsgId)
+                }
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Failed to update remote metadata", e)
+            }
+        }
+    }
+
+    /**
+     * Requests a debounced metadata save. Multiple rapid calls are coalesced
+     * into a single Telegram API call 2 seconds after the last request.
+     */
+    private fun saveMetadataRemote(userId: String) {
+        metadataSaveRequest.tryEmit(userId)
     }
 }

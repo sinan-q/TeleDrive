@@ -73,6 +73,12 @@ interface SecurePrefs {
     /** Whether to use system biometric/device credential for unlock */
     fun isBiometricUnlockEnabled(): Boolean
     fun setBiometricUnlock(enabled: Boolean)
+
+    /** Store the message ID of the metadata message */
+    fun setMetadataMessageId(messageId: Long?)
+
+    /** Get the message ID of the metadata message */
+    fun getMetadataMessageId(): Long?
 }
 
 /**
@@ -98,6 +104,7 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_STORAGE_CHANNEL_NAME = "key_storage_channel_name"
         private const val KEY_AUTH_ON_LAUNCH = "key_auth_on_launch"
         private const val KEY_BIOMETRIC_UNLOCK = "key_biometric_unlock"
+        private const val KEY_METADATA_MESSAGE_ID = "key_metadata_message_id"
     }
 
     private val sharedPreferences = createEncryptedPrefs(context)
@@ -238,6 +245,24 @@ class SecurePrefsImpl @Inject constructor(
         sharedPreferences.edit()
             .putBoolean(KEY_BIOMETRIC_UNLOCK, enabled)
             .apply()
+    }
+
+    override fun setMetadataMessageId(messageId: Long?) {
+        val editor = sharedPreferences.edit()
+        if (messageId != null) {
+            editor.putLong(KEY_METADATA_MESSAGE_ID, messageId)
+        } else {
+            editor.remove(KEY_METADATA_MESSAGE_ID)
+        }
+        editor.apply()
+    }
+
+    override fun getMetadataMessageId(): Long? {
+        return if (sharedPreferences.contains(KEY_METADATA_MESSAGE_ID)) {
+            sharedPreferences.getLong(KEY_METADATA_MESSAGE_ID, 0L)
+        } else {
+            null
+        }
     }
 
     private fun createEncryptedPrefs(context: Context): SharedPreferences {

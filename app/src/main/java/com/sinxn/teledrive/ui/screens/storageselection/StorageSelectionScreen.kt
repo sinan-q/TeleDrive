@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,7 +37,8 @@ fun StorageSelectionScreen(
     val selectedChannelKind by viewModel.selectedChannelKind.collectAsState()
     val selectedChannelPhotoPath by viewModel.selectedChannelPhotoPath.collectAsState()
     var showChannelPicker by remember { mutableStateOf(false) }
-    var syncExistingFiles by remember { mutableStateOf(false) }
+    var isCheckingVault by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -47,13 +49,35 @@ fun StorageSelectionScreen(
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
                 Button(
-                    onClick = { onContinue(syncExistingFiles) },
+                    onClick = {
+                        isCheckingVault = true
+                        errorMessage = null
+                        viewModel.validateStorageLocation { validation ->
+                            isCheckingVault = false
+                            when (validation) {
+                                is com.sinxn.teledrive.data.repository.StorageValidation.Empty -> onContinue(false)
+                                is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault -> onContinue(true)
+                                is com.sinxn.teledrive.data.repository.StorageValidation.Invalid -> {
+                                    errorMessage = "This location contains existing non-TeleDrive messages. Please select an empty chat or a valid TeleDrive vault."
+                                }
+                            }
+                        }
+                    },
+                    enabled = !isCheckingVault,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp, vertical = 16.dp)
                         .navigationBarsPadding()
                 ) {
-                    Text("Continue")
+                    if (isCheckingVault) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Continue")
+                    }
                 }
             }
         }
@@ -120,46 +144,43 @@ fun StorageSelectionScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ── Sync existing files toggle ──────────────────────
+            // Warning note (always enabled because we automatically sync remote vault)
+            Spacer(modifier = Modifier.height(12.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
                 )
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { syncExistingFiles = !syncExistingFiles }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Sync existing files?",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Import encrypted files already in this chat",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = syncExistingFiles,
-                        onCheckedChange = { syncExistingFiles = it }
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isFromSettings) {
+                            "This will sync files from the new location. Ensure they were encrypted with your current master password."
+                        } else {
+                            "The master password you set on the next screen must be the same as the one used to encrypt the existing files."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                 }
             }
 
-            // Warning note when sync is enabled
-            if (syncExistingFiles) {
+            if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        containerColor = MaterialTheme.colorScheme.errorContainer
                     )
                 ) {
                     Row(
@@ -167,20 +188,16 @@ fun StorageSelectionScreen(
                         verticalAlignment = Alignment.Top
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Info,
+                            imageVector = Icons.Default.Warning,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isFromSettings) {
-                                "This will sync files from the new location. Ensure they were encrypted with your current master password."
-                            } else {
-                                "The master password you set on the next screen must be the same as the one used to encrypt the existing files."
-                            },
+                            text = errorMessage!!,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                            color = MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
                 }
