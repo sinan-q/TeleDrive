@@ -8,6 +8,9 @@ import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.drinkless.tdlib.TdApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -155,16 +158,32 @@ class MetadataManager @Inject constructor(
         return validateStorageChat(chatId) is StorageValidation.ExistingVault
     }
 
+    /**
+     * Internal helper to initiate TDLib file download and suspend until completion.
+     */
+    private suspend fun downloadMetadataFileInternal(fileId: Int): TdApi.File? {
+        val fileObj = telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, true)) as? TdApi.File ?: return null
+        if (fileObj.local.isDownloadingCompleted && fileObj.local.path.isNotEmpty()) {
+            return fileObj
+        }
+        return withTimeoutOrNull(15000L) {
+            telegramClient.updates
+                .filterIsInstance<TdApi.UpdateFile>()
+                .firstOrNull { it.file.id == fileId && it.file.local.isDownloadingCompleted && it.file.local.path.isNotEmpty() }
+                ?.file
+        }
+    }
+
     suspend fun verifyVaultPassword(chatId: Long, candidatePassword: String): Boolean {
         return try {
             val firstMessage = fetchFirstMessage(chatId) ?: return false
             val content = firstMessage.content as? TdApi.MessageDocument ?: return false
             val fileId = content.document.document.id
 
-            val result = telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, true))
-            if (result !is TdApi.File || result.local.path.isEmpty()) return false
+            val tdFile = downloadMetadataFileInternal(fileId) ?: return false
+            if (tdFile.local.path.isEmpty()) return false
 
-            val fileBytes = File(result.local.path).readBytes()
+            val fileBytes = File(tdFile.local.path).readBytes()
             val decryptedBytes = fileCryptor.decryptBytesWithPassword(fileBytes, candidatePassword)
             val jsonString = String(decryptedBytes, Charsets.UTF_8)
             jsonString.contains("TELEDRIVE_VAULT_V1")
@@ -185,18 +204,13 @@ class MetadataManager @Inject constructor(
      * Throws an error (or AEADBadTagException) if decryption fails.
      */
     suspend fun downloadMetadataFileBlocking(fileId: Int): String {
-        val result = telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, true))
-        if (result is TdApi.File) {
-            val localPath = result.local.path
-            if (localPath.isNotEmpty()) {
-                val fileBytes = File(localPath).readBytes()
-                val decrypted = fileCryptor.decryptBytes(fileBytes)
-                return String(decrypted, Charsets.UTF_8)
-            } else {
-                error("Metadata file downloaded but local path is empty.")
-            }
+        val tdFile = downloadMetadataFileInternal(fileId)
+        if (tdFile != null && tdFile.local.path.isNotEmpty()) {
+            val fileBytes = File(tdFile.local.path).readBytes()
+            val decrypted = fileCryptor.decryptBytes(fileBytes)
+            return String(decrypted, Charsets.UTF_8)
         } else {
-            error("Failed to download metadata file: ${result.javaClass.simpleName}")
+            error("Failed to download metadata file (fileId: $fileId)")
         }
     }
 }

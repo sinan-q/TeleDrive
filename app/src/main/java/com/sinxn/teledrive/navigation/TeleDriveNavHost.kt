@@ -48,7 +48,7 @@ fun TeleDriveNavHost(
                 onContinue = { isSyncMode ->
                     if (route.isFromSettings) {
                         if (isSyncMode) {
-                            navController.navigate(Route.SyncProgress(isFromSettings = true)) {
+                            navController.navigate(Route.MasterPassword(isSyncMode = true)) {
                                 popUpTo<Route.StorageSelection> { inclusive = true }
                             }
                         } else {
@@ -79,8 +79,14 @@ fun TeleDriveNavHost(
                             }
                         }
                     } else {
-                        navController.navigate(Route.Home) {
-                            popUpTo<Route.MasterPassword> { inclusive = true }
+                        if (masterPasswordRoute.isSyncMode) {
+                            navController.navigate(Route.SyncProgress(isFromSettings = true)) {
+                                popUpTo<Route.MasterPassword> { inclusive = true }
+                            }
+                        } else {
+                            navController.navigate(Route.Home) {
+                                popUpTo<Route.MasterPassword> { inclusive = true }
+                            }
                         }
                     }
                 }

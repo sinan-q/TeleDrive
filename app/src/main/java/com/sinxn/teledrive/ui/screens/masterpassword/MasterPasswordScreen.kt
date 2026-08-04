@@ -201,16 +201,18 @@ fun MasterPasswordScreen(
                         OutlinedTextField(
                             value = password,
                             onValueChange = { password = it },
-                            label = { Text(if (isSetupMode) "Create Password" else "Master Password") },
+                            label = { Text(if (isSetupMode && !isSyncMode) "Create Password" else "Master Password") },
                             singleLine = true,
                             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Password,
-                                imeAction = if (isSetupMode) ImeAction.Next else ImeAction.Done
+                                imeAction = if (isSetupMode && !isSyncMode) ImeAction.Next else ImeAction.Done
                             ),
                             keyboardActions = KeyboardActions(
                                 onDone = {
-                                    if (!isSetupMode && password.isNotBlank()) {
+                                    if (isSetupMode) {
+                                        viewModel.createPassword(password, confirmPassword)
+                                    } else {
                                         viewModel.unlockWithPassword(password)
                                     }
                                 }
@@ -226,8 +228,8 @@ fun MasterPasswordScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        // Confirm password field (setup mode only)
-                        if (isSetupMode) {
+                        // Confirm password field (setup mode only when NOT in sync mode)
+                        if (isSetupMode && !isSyncMode) {
                             Spacer(modifier = Modifier.height(12.dp))
 
                             OutlinedTextField(
@@ -263,7 +265,11 @@ fun MasterPasswordScreen(
                             modifier = Modifier.fillMaxWidth(),
                             enabled = password.isNotBlank()
                         ) {
-                            Text(if (isSetupMode) "Set Master Password" else "Unlock")
+                            Text(
+                                if (isSyncMode) "Verify & Sync Vault"
+                                else if (isSetupMode) "Set Master Password"
+                                else "Unlock"
+                            )
                         }
 
                         if (isSetupMode) {
