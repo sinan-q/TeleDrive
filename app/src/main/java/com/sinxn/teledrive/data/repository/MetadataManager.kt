@@ -197,13 +197,22 @@ class MetadataManager @Inject constructor(
             return StorageValidation.ExistingVault
         }
 
-        // 2. If no metadata message exists, check if chat has any messages at all
+        // 2. If no metadata message exists, check if chat has any non-service user messages
         val historyResult = telegramClient.send(
-            TdApi.GetChatHistory(chatId, 0L, 0, 1, false)
+            TdApi.GetChatHistory(chatId, 0L, 0, 100, false)
         )
-        val hasAnyMessages = historyResult is TdApi.Messages && historyResult.messages.isNotEmpty()
+        val hasUserMessages = historyResult is TdApi.Messages && historyResult.messages.any { msg ->
+            msg.content is TdApi.MessageText ||
+            msg.content is TdApi.MessageDocument ||
+            msg.content is TdApi.MessagePhoto ||
+            msg.content is TdApi.MessageVideo ||
+            msg.content is TdApi.MessageAudio ||
+            msg.content is TdApi.MessageVoiceNote ||
+            msg.content is TdApi.MessageSticker ||
+            msg.content is TdApi.MessageAnimation
+        }
 
-        return if (!hasAnyMessages) {
+        return if (!hasUserMessages) {
             StorageValidation.Empty
         } else {
             StorageValidation.Invalid
