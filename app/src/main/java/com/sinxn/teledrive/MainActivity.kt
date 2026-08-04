@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
 import com.sinxn.teledrive.data.crypto.EncryptionManager
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.local.prefs.SetupStep
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.navigation.Route
 import com.sinxn.teledrive.navigation.TeleDriveNavHost
@@ -44,17 +45,39 @@ class MainActivity : FragmentActivity() {
                 val hasSession = securePrefs.hasSession()
                 val hasMasterPassword = encryptionManager.isPasswordSetUp()
                 val authOnLaunch = securePrefs.isAuthOnLaunchEnabled()
+                val setupStep = securePrefs.getSetupStep()
+                val isSyncMode = securePrefs.isSyncMode()
 
                 val startDest: Route
                 val isFirstTimeSetup: Boolean
 
                 when {
-                    // First install: no session yet → Login flow
-                    !hasSession -> {
+                    // First install or logged out: no session yet -> Login flow
+                    !hasSession || setupStep == SetupStep.LOGIN -> {
                         startDest = Route.Login
                         isFirstTimeSetup = true
                     }
-                    // Has session + has master password + auth disabled → auto-unlock, go to Home
+                    // Setup in progress: Storage Selection
+                    setupStep == SetupStep.STORAGE_SELECTION -> {
+                        startDest = Route.StorageSelection()
+                        isFirstTimeSetup = true
+                    }
+                    // Setup in progress: Master Password
+                    setupStep == SetupStep.MASTER_PASSWORD -> {
+                        startDest = Route.MasterPassword(isSyncMode = isSyncMode)
+                        isFirstTimeSetup = true
+                    }
+                    // Setup in progress: Syncing files from Telegram
+                    setupStep == SetupStep.SYNC_PROGRESS -> {
+                        startDest = Route.SyncProgress(isFromSettings = false)
+                        isFirstTimeSetup = true
+                    }
+                    // Setup in progress: Security Preferences
+                    setupStep == SetupStep.SECURITY_PREFERENCES -> {
+                        startDest = Route.SecurityPreferences
+                        isFirstTimeSetup = true
+                    }
+                    // Setup completed: has master password + auth disabled -> auto-unlock, go to Home
                     hasMasterPassword && !authOnLaunch -> {
                         val storedSecret = securePrefs.getAutoUnlockSecret()
                         val didUnlock = if (storedSecret != null && !encryptionManager.isUnlocked) {
@@ -73,14 +96,14 @@ class MainActivity : FragmentActivity() {
                             isFirstTimeSetup = false
                         }
                     }
-                    // Has session + has master password + auth enabled → show MasterPassword screen
+                    // Setup completed: has master password + auth enabled -> show MasterPassword screen
                     hasMasterPassword -> {
                         startDest = Route.MasterPassword()
                         isFirstTimeSetup = false
                     }
-                    // Has session but no master password → continue setup
+                    // Fallback
                     else -> {
-                        startDest = Route.MasterPassword()
+                        startDest = Route.StorageSelection()
                         isFirstTimeSetup = true
                     }
                 }

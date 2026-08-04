@@ -104,6 +104,11 @@ class MasterPasswordViewModel @Inject constructor(
                 }
 
                 persistAutoUnlockSecret(password)
+                if (isSyncMode) {
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SYNC_PROGRESS)
+                } else {
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
+                }
                 _uiState.value = MasterPasswordUiState.Unlocked
 
                 if (!isSyncMode) {

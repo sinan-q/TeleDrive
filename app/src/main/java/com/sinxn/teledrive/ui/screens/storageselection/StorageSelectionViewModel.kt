@@ -54,6 +54,11 @@ class StorageSelectionViewModel @Inject constructor(
         }
     }
 
+    fun saveSetupProgress(isSyncMode: Boolean) {
+        securePrefs.setSyncMode(isSyncMode)
+        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.MASTER_PASSWORD)
+    }
+
     private val selectedChannelId: Long?
         get() = securePrefs.getStorageChannelId()
 

@@ -55,8 +55,18 @@ fun StorageSelectionScreen(
                         viewModel.validateStorageLocation { validation ->
                             isCheckingVault = false
                             when (validation) {
-                                is com.sinxn.teledrive.data.repository.StorageValidation.Empty -> onContinue(false)
-                                is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault -> onContinue(true)
+                                is com.sinxn.teledrive.data.repository.StorageValidation.Empty -> {
+                                    if (!isFromSettings) {
+                                        viewModel.saveSetupProgress(false)
+                                    }
+                                    onContinue(false)
+                                }
+                                is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault -> {
+                                    if (!isFromSettings) {
+                                        viewModel.saveSetupProgress(true)
+                                    }
+                                    onContinue(true)
+                                }
                                 is com.sinxn.teledrive.data.repository.StorageValidation.Invalid -> {
                                     errorMessage = "This location contains existing non-TeleDrive messages. Please select an empty chat or a valid TeleDrive vault."
                                 }

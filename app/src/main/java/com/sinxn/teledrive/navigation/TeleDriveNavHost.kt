@@ -34,6 +34,7 @@ fun TeleDriveNavHost(
         composable<Route.Login> {
             LoginScreen(
                 onLoginSuccess = {
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.STORAGE_SELECTION)
                     navController.navigate(Route.StorageSelection()) {
                         popUpTo(Route.Login) { inclusive = true }
                     }
@@ -96,6 +97,7 @@ fun TeleDriveNavHost(
         composable<Route.SecurityPreferences> {
             SecurityPreferencesScreen(
                 onContinue = {
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.COMPLETED)
                     navController.navigate(Route.Home) {
                         popUpTo(Route.SecurityPreferences) { inclusive = true }
                     }
@@ -110,6 +112,7 @@ fun TeleDriveNavHost(
                     if (route.isFromSettings) {
                         navController.popBackStack()
                     } else {
+                        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
                         navController.navigate(Route.SecurityPreferences) {
                             popUpTo<Route.SyncProgress> { inclusive = true }
                         }

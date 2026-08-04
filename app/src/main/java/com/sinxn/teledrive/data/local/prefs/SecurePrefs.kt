@@ -10,6 +10,15 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.core.content.edit
 
+enum class SetupStep {
+    LOGIN,
+    STORAGE_SELECTION,
+    MASTER_PASSWORD,
+    SYNC_PROGRESS,
+    SECURITY_PREFERENCES,
+    COMPLETED
+}
+
 /**
  * Interface defining secure local storage operations.
  */
@@ -20,6 +29,14 @@ interface SecurePrefs {
     fun setUserId(userId: String)
     fun getUserId(): String?
     fun clearUserId()
+
+    /** Tracks the current step in the onboarding/setup flow */
+    fun setSetupStep(step: SetupStep)
+    fun getSetupStep(): SetupStep
+
+    /** Tracks whether the user is restoring/syncing an existing vault */
+    fun setSyncMode(isSyncMode: Boolean)
+    fun isSyncMode(): Boolean
 
     /** Returns true if the user has set a master encryption password */
     fun hasMasterPassword(): Boolean
@@ -96,6 +113,8 @@ class SecurePrefsImpl @Inject constructor(
         private const val VALUE_KEYSET_PREFS = "${PREFS_FILE_NAME}__androidx_security_crypto_encrypted_prefs_value_keyset__"
         private const val KEY_HAS_SESSION = "key_has_session"
         private const val KEY_USER_ID = "key_user_id"
+        private const val KEY_SETUP_STEP = "key_setup_step"
+        private const val KEY_IS_SYNC_MODE = "key_is_sync_mode"
         private const val KEY_MASTER_PW_HASH = "key_master_pw_hash"
         private const val KEY_MASTER_PW_SALT = "key_master_pw_salt"
         private const val KEY_AUTO_UNLOCK_SECRET = "key_auto_unlock_secret"
@@ -135,6 +154,39 @@ class SecurePrefsImpl @Inject constructor(
         }
     }
 
+    override fun setSetupStep(step: SetupStep) {
+        sharedPreferences.edit {
+            putString(KEY_SETUP_STEP, step.name)
+        }
+    }
+
+    override fun getSetupStep(): SetupStep {
+        val stepName = sharedPreferences.getString(KEY_SETUP_STEP, null)
+        return stepName?.let {
+            try {
+                SetupStep.valueOf(it)
+            } catch (e: IllegalArgumentException) {
+                SetupStep.LOGIN
+            }
+        } ?: if (hasSession() && hasMasterPassword()) {
+            SetupStep.COMPLETED
+        } else if (hasSession()) {
+            SetupStep.STORAGE_SELECTION
+        } else {
+            SetupStep.LOGIN
+        }
+    }
+
+    override fun setSyncMode(isSyncMode: Boolean) {
+        sharedPreferences.edit {
+            putBoolean(KEY_IS_SYNC_MODE, isSyncMode)
+        }
+    }
+
+    override fun isSyncMode(): Boolean {
+        return sharedPreferences.getBoolean(KEY_IS_SYNC_MODE, false)
+    }
+
     override fun hasMasterPassword(): Boolean {
         return sharedPreferences.getString(KEY_MASTER_PW_HASH, null) != null
     }
@@ -160,6 +212,8 @@ class SecurePrefsImpl @Inject constructor(
                 .remove(KEY_MASTER_PW_SALT)
                 .remove(KEY_AUTO_UNLOCK_SECRET)
                 .remove(KEY_BIOMETRIC_UNLOCK_SECRET)
+                .remove(KEY_SETUP_STEP)
+                .remove(KEY_IS_SYNC_MODE)
         }
     }
 

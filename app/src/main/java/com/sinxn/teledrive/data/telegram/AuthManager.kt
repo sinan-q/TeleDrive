@@ -98,11 +98,15 @@ class AuthManager @Inject constructor(
             }
             is TdApi.AuthorizationStateReady -> {
                 securePrefs.setHasSession(true)
+                if (securePrefs.getSetupStep() == com.sinxn.teledrive.data.local.prefs.SetupStep.LOGIN) {
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.STORAGE_SELECTION)
+                }
                 _authState.value = AuthState.Ready
                 syncAuthenticatedUser()
             }
             is TdApi.AuthorizationStateLoggingOut -> {
                 securePrefs.setHasSession(false)
+                securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.LOGIN)
                 securePrefs.clearUserId()
                 securePrefs.clearAutoUnlockSecret()
                 securePrefs.clearBiometricUnlockSecret()
@@ -111,6 +115,7 @@ class AuthManager @Inject constructor(
             }
             is TdApi.AuthorizationStateClosed -> {
                 securePrefs.setHasSession(false)
+                securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.LOGIN)
                 securePrefs.clearUserId()
                 securePrefs.clearAutoUnlockSecret()
                 securePrefs.clearBiometricUnlockSecret()
