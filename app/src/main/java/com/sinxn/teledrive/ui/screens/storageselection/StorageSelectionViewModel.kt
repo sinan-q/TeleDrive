@@ -152,7 +152,7 @@ class StorageSelectionViewModel @Inject constructor(
                         }
                     } else null
                 }.filter {
-                    query.isEmpty() || it.title.contains(query, ignoreCase = true)
+                    it.hasWritePermission && (query.isEmpty() || it.title.contains(query, ignoreCase = true))
                 }
 
                 val finalList = mutableListOf<StorageLocationOption>()

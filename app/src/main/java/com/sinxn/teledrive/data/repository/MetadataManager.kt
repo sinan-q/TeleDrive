@@ -134,6 +134,14 @@ class MetadataManager @Inject constructor(
     }
 
     suspend fun validateStorageChat(chatId: Long): StorageValidation {
+        val chatObj = telegramClient.send(TdApi.GetChat(chatId))
+        if (chatObj is TdApi.Chat) {
+            val canWrite = chatObj.permissions?.canSendDocuments == true || chatObj.permissions?.canSendBasicMessages == true
+            if (!canWrite) {
+                return StorageValidation.Invalid
+            }
+        }
+
         val firstMessage = fetchFirstMessage(chatId) ?: return StorageValidation.Empty
         val content = firstMessage.content
         return if (content is TdApi.MessageDocument && content.caption.text == METADATA_CAPTION) {

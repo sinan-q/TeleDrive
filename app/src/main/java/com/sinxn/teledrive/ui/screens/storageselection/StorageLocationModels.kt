@@ -13,7 +13,8 @@ data class StorageLocationOption(
     val title: String,
     val kind: StorageLocationKind,
     val photoFileId: Int? = null,
-    val photoPath: String? = null
+    val photoPath: String? = null,
+    val hasWritePermission: Boolean = true
 )
 
 fun TdApi.Chat.toStorageLocationOption(): StorageLocationOption {
@@ -24,6 +25,8 @@ fun TdApi.Chat.toStorageLocationOption(): StorageLocationOption {
         else -> StorageLocationKind.Group
     }
 
+    val canWrite = permissions?.canSendDocuments == true || permissions?.canSendBasicMessages == true
+
     return StorageLocationOption(
         id = id,
         title = title,
@@ -31,6 +34,7 @@ fun TdApi.Chat.toStorageLocationOption(): StorageLocationOption {
         photoFileId = photo?.small?.id,
         photoPath = photo?.small?.local
             ?.takeIf { it.isDownloadingCompleted && it.path.isNotEmpty() }
-            ?.path
+            ?.path,
+        hasWritePermission = canWrite
     )
 }
