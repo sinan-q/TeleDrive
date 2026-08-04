@@ -183,6 +183,7 @@ class StorageSelectionViewModel @Inject constructor(
     }
 
     fun selectChannel(id: Long, title: String, kind: StorageLocationKind) {
+        metadataManager.clearCache()
         securePrefs.setMetadataMessageId(null)
         if (id == 0L) {
             securePrefs.setStorageChannelId(null)

@@ -543,55 +543,50 @@ class FileRepositoryImpl @Inject constructor(
             var currentMetrics = com.sinxn.teledrive.data.model.SyncMetrics()
             _syncStatus.value = SyncStatus.Syncing(currentMetrics)
             
-            val configuredChatId = securePrefs.getStorageChannelId()
-            val targetChatId = if (configuredChatId != null) {
-                configuredChatId
-            } else {
-                val chat = telegramClient.send(
-                    TdApi.CreatePrivateChat(userId.toLong(), true)
-                ) as TdApi.Chat
-                chat.id
+            val targetChatId = securePrefs.getStorageChannelId()
+            if (targetChatId == null) {
+                _syncStatus.value = SyncStatus.Error("No storage location selected. Please configure a storage location in setup.")
+                return
             }
 
             Log.d("FileRepositoryImpl", "Starting metadata sync for chat $targetChatId")
             telegramClient.send(TdApi.OpenChat(targetChatId))
 
-            val metadataMsg = metadataManager.findMetadataMessage(targetChatId)
+            val cachedJson = metadataManager.consumeCachedDecryptedJson()
+            if (cachedJson != null) {
+                Log.d("FileRepositoryImpl", "Using cached decrypted metadata payload. Loading database.")
+                metadataManager.importMetadata(cachedJson)
+            } else {
+                Log.d("FileRepositoryImpl", "No cached metadata. Finding and decrypting remote metadata message...")
+                val metadataMsg = metadataManager.findMetadataMessage(targetChatId)
 
-            if (metadataMsg == null) {
-                val validation = metadataManager.validateStorageChat(targetChatId)
-                if (validation is StorageValidation.Empty) {
-                    Log.d("FileRepositoryImpl", "Chat is empty. Initializing new vault.")
-                    val newMsgId = metadataManager.initializeMetadataMessage(targetChatId)
-                    securePrefs.setMetadataMessageId(newMsgId)
-                    _syncStatus.value = SyncStatus.Completed(currentMetrics)
-                    return
-                } else {
-                    _syncStatus.value = SyncStatus.Error("This chat is not a valid TeleDrive vault (Metadata missing or contains non-TeleDrive data).")
+                if (metadataMsg == null) {
+                    _syncStatus.value = SyncStatus.Error("No existing TeleDrive vault metadata found in this chat.")
                     return
                 }
-            }
 
-            val content = metadataMsg.content
-            if (content !is TdApi.MessageDocument || content.caption.text != MetadataManager.METADATA_CAPTION) {
-                _syncStatus.value = SyncStatus.Error("This chat is not a valid TeleDrive vault (Metadata missing).")
-                return
-            }
+                val content = metadataMsg.content
+                if (content !is TdApi.MessageDocument || content.caption.text != MetadataManager.METADATA_CAPTION) {
+                    _syncStatus.value = SyncStatus.Error("This chat is not a valid TeleDrive vault (Metadata missing or invalid).")
+                    return
+                }
 
-            // Valid vault, attempt download & decryption
-            Log.d("FileRepositoryImpl", "Found metadata message. Downloading and decrypting...")
-            val fileId = content.document.document.id
-            securePrefs.setMetadataMessageId(metadataMsg.id)
-            
-            // This blocks until downloaded and throws if password wrong (AEADBadTagException)
-            val jsonPayload = metadataManager.downloadMetadataFileBlocking(fileId)
-            
-            Log.d("FileRepositoryImpl", "Decryption successful. Loading database.")
-            metadataManager.importMetadata(jsonPayload)
+                // Valid vault, attempt download & decryption
+                Log.d("FileRepositoryImpl", "Found metadata message. Downloading and decrypting...")
+                val fileId = content.document.document.id
+                securePrefs.setMetadataMessageId(metadataMsg.id)
+                
+                // This blocks until downloaded and throws if password wrong (AEADBadTagException)
+                val jsonPayload = metadataManager.downloadMetadataFileBlocking(fileId)
+                
+                Log.d("FileRepositoryImpl", "Decryption successful. Loading database.")
+                metadataManager.importMetadata(jsonPayload)
+            }
 
             // Step 5: Read-Only Reconciliation (Scan chat for additional/deleted files)
             var lastMsgId = 0L
             val additionalFiles = mutableListOf<String>()
+            val metadataMessageId = securePrefs.getMetadataMessageId() ?: metadataManager.getCachedMetadataMessageId()
             
             // Track all message IDs in the database to find which are missing from Telegram
             val allFiles = fileDao.getAllFiles()
@@ -617,7 +612,7 @@ class FileRepositoryImpl @Inject constructor(
                 // Reconcile logic (Just tracking metrics and logging for now to show on UI later)
                 val docsInBatch = messages.filter { it.content is TdApi.MessageDocument }
                 for (msg in docsInBatch) {
-                    if (msg.id != metadataMsg.id) {
+                    if (msg.id != metadataMessageId) {
                         val msgIdStr = msg.id.toString()
                         pendingDbMessageIds.remove(msgIdStr)
                         // Check if it's in our DB

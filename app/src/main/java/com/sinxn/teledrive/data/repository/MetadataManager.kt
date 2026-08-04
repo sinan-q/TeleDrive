@@ -148,6 +148,31 @@ class MetadataManager @Inject constructor(
         return null
     }
 
+    @Volatile
+    private var cachedEncryptedBytes: ByteArray? = null
+
+    @Volatile
+    private var cachedMetadataMessageId: Long? = null
+
+    @Volatile
+    private var cachedDecryptedJson: String? = null
+
+    fun clearCache() {
+        cachedEncryptedBytes = null
+        cachedMetadataMessageId = null
+        cachedDecryptedJson = null
+    }
+
+    fun getCachedDecryptedJson(): String? = cachedDecryptedJson
+
+    fun getCachedMetadataMessageId(): Long? = cachedMetadataMessageId
+
+    fun consumeCachedDecryptedJson(): String? {
+        val payload = cachedDecryptedJson
+        cachedDecryptedJson = null
+        return payload
+    }
+
     /**
      * Alias for findMetadataMessage for backward compatibility.
      */
@@ -167,6 +192,15 @@ class MetadataManager @Inject constructor(
         // 1. Check if the chat contains an existing TeleDrive vault metadata message
         val metadataMsg = findMetadataMessage(chatId)
         if (metadataMsg != null) {
+            cachedMetadataMessageId = metadataMsg.id
+            val doc = metadataMsg.content as? TdApi.MessageDocument
+            val fileId = doc?.document?.document?.id
+            if (fileId != null) {
+                val tdFile = downloadMetadataFileInternal(fileId)
+                if (tdFile != null && tdFile.local.path.isNotEmpty()) {
+                    cachedEncryptedBytes = runCatching { File(tdFile.local.path).readBytes() }.getOrNull()
+                }
+            }
             return StorageValidation.ExistingVault
         }
 
@@ -205,17 +239,27 @@ class MetadataManager @Inject constructor(
 
     suspend fun verifyVaultPassword(chatId: Long, candidatePassword: String): Boolean {
         return try {
-            val firstMessage = fetchFirstMessage(chatId) ?: return false
-            val content = firstMessage.content as? TdApi.MessageDocument ?: return false
-            val fileId = content.document.document.id
+            val fileBytes = cachedEncryptedBytes ?: run {
+                val firstMessage = fetchFirstMessage(chatId) ?: return false
+                val content = firstMessage.content as? TdApi.MessageDocument ?: return false
+                val fileId = content.document.document.id
 
-            val tdFile = downloadMetadataFileInternal(fileId) ?: return false
-            if (tdFile.local.path.isEmpty()) return false
+                val tdFile = downloadMetadataFileInternal(fileId) ?: return false
+                if (tdFile.local.path.isEmpty()) return false
 
-            val fileBytes = File(tdFile.local.path).readBytes()
+                val bytes = File(tdFile.local.path).readBytes()
+                cachedEncryptedBytes = bytes
+                cachedMetadataMessageId = firstMessage.id
+                bytes
+            }
+
             val decryptedBytes = fileCryptor.decryptBytesWithPassword(fileBytes, candidatePassword)
             val jsonString = String(decryptedBytes, Charsets.UTF_8)
-            jsonString.contains("TELEDRIVE_VAULT_V1")
+            val isValid = jsonString.contains("TELEDRIVE_VAULT_V1")
+            if (isValid) {
+                cachedDecryptedJson = jsonString
+            }
+            isValid
         } catch (e: Exception) {
             false
         }
