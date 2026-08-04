@@ -556,18 +556,23 @@ class FileRepositoryImpl @Inject constructor(
             Log.d("FileRepositoryImpl", "Starting metadata sync for chat $targetChatId")
             telegramClient.send(TdApi.OpenChat(targetChatId))
 
-            val firstMessage = metadataManager.fetchFirstMessage(targetChatId)
+            val metadataMsg = metadataManager.findMetadataMessage(targetChatId)
 
-            if (firstMessage == null) {
-                // Empty chat, initialize vault
-                Log.d("FileRepositoryImpl", "Chat is empty. Initializing new vault.")
-                val newMsgId = metadataManager.initializeMetadataMessage(targetChatId)
-                securePrefs.setMetadataMessageId(newMsgId)
-                _syncStatus.value = SyncStatus.Completed(currentMetrics)
-                return
+            if (metadataMsg == null) {
+                val validation = metadataManager.validateStorageChat(targetChatId)
+                if (validation is StorageValidation.Empty) {
+                    Log.d("FileRepositoryImpl", "Chat is empty. Initializing new vault.")
+                    val newMsgId = metadataManager.initializeMetadataMessage(targetChatId)
+                    securePrefs.setMetadataMessageId(newMsgId)
+                    _syncStatus.value = SyncStatus.Completed(currentMetrics)
+                    return
+                } else {
+                    _syncStatus.value = SyncStatus.Error("This chat is not a valid TeleDrive vault (Metadata missing or contains non-TeleDrive data).")
+                    return
+                }
             }
 
-            val content = firstMessage.content
+            val content = metadataMsg.content
             if (content !is TdApi.MessageDocument || content.caption.text != MetadataManager.METADATA_CAPTION) {
                 _syncStatus.value = SyncStatus.Error("This chat is not a valid TeleDrive vault (Metadata missing).")
                 return
@@ -576,7 +581,7 @@ class FileRepositoryImpl @Inject constructor(
             // Valid vault, attempt download & decryption
             Log.d("FileRepositoryImpl", "Found metadata message. Downloading and decrypting...")
             val fileId = content.document.document.id
-            securePrefs.setMetadataMessageId(firstMessage.id)
+            securePrefs.setMetadataMessageId(metadataMsg.id)
             
             // This blocks until downloaded and throws if password wrong (AEADBadTagException)
             val jsonPayload = metadataManager.downloadMetadataFileBlocking(fileId)
@@ -612,7 +617,7 @@ class FileRepositoryImpl @Inject constructor(
                 // Reconcile logic (Just tracking metrics and logging for now to show on UI later)
                 val docsInBatch = messages.filter { it.content is TdApi.MessageDocument }
                 for (msg in docsInBatch) {
-                    if (msg.id != firstMessage.id) {
+                    if (msg.id != metadataMsg.id) {
                         val msgIdStr = msg.id.toString()
                         pendingDbMessageIds.remove(msgIdStr)
                         // Check if it's in our DB
@@ -816,10 +821,10 @@ class FileRepositoryImpl @Inject constructor(
                 var messageId = securePrefs.getMetadataMessageId()
                 
                 if (messageId == null || messageId == 0L) {
-                    val firstMsg = metadataManager.fetchFirstMessage(chatId)
-                    if (firstMsg != null && firstMsg.content is TdApi.MessageDocument && 
-                        (firstMsg.content as TdApi.MessageDocument).caption.text == MetadataManager.METADATA_CAPTION) {
-                        messageId = firstMsg.id
+                    val metadataMsg = metadataManager.findMetadataMessage(chatId)
+                    if (metadataMsg != null && metadataMsg.content is TdApi.MessageDocument && 
+                        (metadataMsg.content as TdApi.MessageDocument).caption.text == MetadataManager.METADATA_CAPTION) {
+                        messageId = metadataMsg.id
                         securePrefs.setMetadataMessageId(messageId)
                     }
                 }

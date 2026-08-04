@@ -119,21 +119,40 @@ class MetadataManager @Inject constructor(
         }
     }
 
-    suspend fun fetchFirstMessage(chatId: Long): TdApi.Message? {
+    /**
+     * Searches for the TeleDrive vault metadata message in the specified chat using SearchChatMessages.
+     * Guaranteed to locate the metadata document regardless of chat history length or message offset.
+     */
+    suspend fun findMetadataMessage(chatId: Long): TdApi.Message? {
         val result = telegramClient.send(
-            TdApi.GetChatHistory(
+            TdApi.SearchChatMessages(
                 chatId,
+                null,
+                METADATA_CAPTION,
+                null,
                 0L,
-                -99, // Negative offset to fetch oldest messages
+                0,
                 1,
-                false
+                TdApi.SearchMessagesFilterDocument()
             )
         )
-        return if (result is TdApi.Messages) {
-            result.messages.firstOrNull()
-        } else {
-            null
+        if (result is TdApi.FoundChatMessages) {
+            val msg = result.messages.firstOrNull()
+            if (msg != null && msg.content is TdApi.MessageDocument) {
+                val doc = msg.content as TdApi.MessageDocument
+                if (doc.caption.text == METADATA_CAPTION) {
+                    return msg
+                }
+            }
         }
+        return null
+    }
+
+    /**
+     * Alias for findMetadataMessage for backward compatibility.
+     */
+    suspend fun fetchFirstMessage(chatId: Long): TdApi.Message? {
+        return findMetadataMessage(chatId)
     }
 
     suspend fun validateStorageChat(chatId: Long): StorageValidation {
@@ -145,10 +164,20 @@ class MetadataManager @Inject constructor(
             }
         }
 
-        val firstMessage = fetchFirstMessage(chatId) ?: return StorageValidation.Empty
-        val content = firstMessage.content
-        return if (content is TdApi.MessageDocument && content.caption.text == METADATA_CAPTION) {
-            StorageValidation.ExistingVault
+        // 1. Check if the chat contains an existing TeleDrive vault metadata message
+        val metadataMsg = findMetadataMessage(chatId)
+        if (metadataMsg != null) {
+            return StorageValidation.ExistingVault
+        }
+
+        // 2. If no metadata message exists, check if chat has any messages at all
+        val historyResult = telegramClient.send(
+            TdApi.GetChatHistory(chatId, 0L, 0, 1, false)
+        )
+        val hasAnyMessages = historyResult is TdApi.Messages && historyResult.messages.isNotEmpty()
+
+        return if (!hasAnyMessages) {
+            StorageValidation.Empty
         } else {
             StorageValidation.Invalid
         }
