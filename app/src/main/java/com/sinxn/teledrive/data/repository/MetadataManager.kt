@@ -5,6 +5,8 @@ import android.util.Log
 import com.sinxn.teledrive.data.backup.BackupManager
 import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.telegram.TelegramClient
+import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.local.prefs.SetupStep
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.drinkless.tdlib.TdApi
 import kotlinx.coroutines.delay
@@ -20,7 +22,8 @@ class MetadataManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val telegramClient: TelegramClient,
     private val fileCryptor: FileCryptor,
-    private val backupManager: BackupManager
+    private val backupManager: BackupManager,
+    private val securePrefs: SecurePrefs
 ) {
 
     companion object {
@@ -288,10 +291,56 @@ class MetadataManager @Inject constructor(
             error("Failed to download metadata file (fileId: $fileId)")
         }
     }
+
+    /**
+     * Checks if the vault metadata message exists on Telegram using the stored message ID.
+     */
+    suspend fun checkStoredMetadataMessage(): CheckStoredMetadataResult {
+        val chatId = securePrefs.getStorageChannelId()
+        val messageId = securePrefs.getMetadataMessageId()
+
+        if (chatId == null || messageId == null) {
+            if (securePrefs.getSetupStep() == SetupStep.COMPLETED) {
+                Log.w("MetadataManager", "Setup is completed but storage channel ID or metadata message ID is missing.")
+                return CheckStoredMetadataResult.NotFound(messageId, "No stored metadata message ID found")
+            }
+            Log.d("MetadataManager", "No stored metadata message ID to check (setup not complete).")
+            return CheckStoredMetadataResult.SkippedNotConfigured
+        }
+
+        Log.d("MetadataManager", "Checking stored metadata message (chatId: $chatId, messageId: $messageId)...")
+
+        return try {
+            val result = telegramClient.send(TdApi.GetMessage(chatId, messageId))
+            if (result is TdApi.Message) {
+                val doc = result.content as? TdApi.MessageDocument
+                if (doc != null && doc.caption.text == METADATA_CAPTION) {
+                    Log.d("MetadataManager", "Metadata message found successfully (ID: $messageId).")
+                    CheckStoredMetadataResult.Found
+                } else {
+                    Log.w("MetadataManager", "Message $messageId found but content or caption is invalid.")
+                    CheckStoredMetadataResult.NotFound(messageId, "Message content is not vault metadata")
+                }
+            } else {
+                val errorMsg = (result as? TdApi.Error)?.message ?: "Message not found"
+                Log.w("MetadataManager", "Metadata message $messageId not found: $errorMsg")
+                CheckStoredMetadataResult.NotFound(messageId, errorMsg)
+            }
+        } catch (e: Exception) {
+            Log.e("MetadataManager", "Exception checking stored metadata message $messageId", e)
+            CheckStoredMetadataResult.NotFound(messageId, e.message ?: "Unknown error")
+        }
+    }
 }
 
 sealed interface StorageValidation {
     data object Empty : StorageValidation
     data object ExistingVault : StorageValidation
     data object Invalid : StorageValidation
+}
+
+sealed interface CheckStoredMetadataResult {
+    data object Found : CheckStoredMetadataResult
+    data class NotFound(val messageId: Long?, val reason: String) : CheckStoredMetadataResult
+    data object SkippedNotConfigured : CheckStoredMetadataResult
 }

@@ -59,7 +59,7 @@ class MainActivity : FragmentActivity() {
                     }
                     // Setup in progress: Storage Selection
                     setupStep == SetupStep.STORAGE_SELECTION -> {
-                        startDest = Route.StorageSelection()
+                        startDest = Route.StorageSelection
                         isFirstTimeSetup = true
                     }
                     // Setup in progress: Master Password
@@ -69,7 +69,7 @@ class MainActivity : FragmentActivity() {
                     }
                     // Setup in progress: Syncing files from Telegram
                     setupStep == SetupStep.SYNC_PROGRESS -> {
-                        startDest = Route.SyncProgress(isFromSettings = false)
+                        startDest = Route.SyncProgress
                         isFirstTimeSetup = true
                     }
                     // Setup in progress: Security Preferences
@@ -103,7 +103,7 @@ class MainActivity : FragmentActivity() {
                     }
                     // Fallback
                     else -> {
-                        startDest = Route.StorageSelection()
+                        startDest = Route.StorageSelection
                         isFirstTimeSetup = true
                     }
                 }

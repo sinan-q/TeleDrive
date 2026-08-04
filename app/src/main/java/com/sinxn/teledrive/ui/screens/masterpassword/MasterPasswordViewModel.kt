@@ -51,8 +51,11 @@ class MasterPasswordViewModel @Inject constructor(
     )
     val showBiometricPrompt: StateFlow<Boolean> = _showBiometricPrompt.asStateFlow()
 
-    /** True when this is the user's first time (setup mode), false when unlocking */
-    val isSetupMode: Boolean get() = !encryptionManager.isPasswordSetUp()
+    /** True when in setup mode or re-configuring vault storage */
+    val isSetupMode: Boolean
+        get() = !encryptionManager.isPasswordSetUp() ||
+                securePrefs.getSetupStep() == com.sinxn.teledrive.data.local.prefs.SetupStep.MASTER_PASSWORD ||
+                securePrefs.getSetupStep() == com.sinxn.teledrive.data.local.prefs.SetupStep.STORAGE_SELECTION
 
     /** True when in sync mode (first time but syncing existing files) */
     val showSyncWarning: Boolean get() = isSyncMode && isSetupMode
@@ -104,10 +107,12 @@ class MasterPasswordViewModel @Inject constructor(
                 }
 
                 persistAutoUnlockSecret(password)
-                if (isSyncMode) {
-                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SYNC_PROGRESS)
-                } else {
-                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
+                if (isSetupMode) {
+                    if (isSyncMode) {
+                        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SYNC_PROGRESS)
+                    } else {
+                        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
+                    }
                 }
                 _uiState.value = MasterPasswordUiState.Unlocked
 

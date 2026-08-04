@@ -28,7 +28,6 @@ import java.io.File
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StorageSelectionScreen(
-    isFromSettings: Boolean = false,
     onContinue: (isSyncMode: Boolean) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: StorageSelectionViewModel = hiltViewModel()
@@ -56,15 +55,11 @@ fun StorageSelectionScreen(
                             isCheckingVault = false
                             when (validation) {
                                 is com.sinxn.teledrive.data.repository.StorageValidation.Empty -> {
-                                    if (!isFromSettings) {
-                                        viewModel.saveSetupProgress(false)
-                                    }
+                                    viewModel.saveSetupProgress(false)
                                     onContinue(false)
                                 }
                                 is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault -> {
-                                    if (!isFromSettings) {
-                                        viewModel.saveSetupProgress(true)
-                                    }
+                                    viewModel.saveSetupProgress(true)
                                     onContinue(true)
                                 }
                                 is com.sinxn.teledrive.data.repository.StorageValidation.Invalid -> {
@@ -154,58 +149,29 @@ fun StorageSelectionScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Warning note for Settings switch vs Setup
-            if (isFromSettings) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-                    )
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Changing storage location will connect TeleDrive to the new chat. If the new location is empty, it will start fresh for new uploads. Automatic file migration from your previous storage location is not supported yet.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.height(12.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(20.dp)
                     )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "If the selected location contains an existing TeleDrive vault, the master password you set on the next screen must match the one used to encrypt those files.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "If the selected location contains an existing TeleDrive vault, the master password you set on the next screen must match the one used to encrypt those files.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
                 }
             }
 

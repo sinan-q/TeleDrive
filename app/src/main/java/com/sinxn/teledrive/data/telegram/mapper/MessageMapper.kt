@@ -1,6 +1,7 @@
 package com.sinxn.teledrive.data.telegram.mapper
 
 import com.sinxn.teledrive.data.local.entity.FileEntity
+import com.sinxn.teledrive.data.repository.MetadataManager
 import org.drinkless.tdlib.TdApi
 
 /**
@@ -37,8 +38,18 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
 
     return when (val content = this.content) {
         is TdApi.MessageDocument -> {
+            // Ignore vault metadata document messages
+            if (content.caption?.text == MetadataManager.METADATA_CAPTION) {
+                return null
+            }
+
             val fileName = content.document.fileName.trim().takeIf { it.isNotBlank() } ?: "Unknown Document"
             
+            // Exclude metadata files or non-encrypted files
+            if (fileName.startsWith("metadata_") && fileName.endsWith(".enc", ignoreCase = true)) {
+                return null
+            }
+
             // Only accept encrypted files uploaded by TeleDrive
             if (!fileName.endsWith(".enc", ignoreCase = true)) {
                 return null

@@ -19,7 +19,14 @@ class StorageSelectionViewModel @Inject constructor(
     private val metadataManager: com.sinxn.teledrive.data.repository.MetadataManager
 ) : ViewModel() {
 
+    init {
+        metadataManager.clearCache()
+        observeFileUpdates()
+        refreshSelectedChannel()
+    }
+
     fun validateStorageLocation(onResult: (com.sinxn.teledrive.data.repository.StorageValidation) -> Unit) {
+        metadataManager.clearCache()
         viewModelScope.launch {
             try {
                 val configuredChatId = selectedChannelId
@@ -185,6 +192,8 @@ class StorageSelectionViewModel @Inject constructor(
     fun selectChannel(id: Long, title: String, kind: StorageLocationKind) {
         metadataManager.clearCache()
         securePrefs.setMetadataMessageId(null)
+        securePrefs.clearAutoUnlockSecret()
+        securePrefs.clearBiometricUnlockSecret()
         if (id == 0L) {
             securePrefs.setStorageChannelId(null)
             securePrefs.setStorageChannelName(null)

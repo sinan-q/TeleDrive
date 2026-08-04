@@ -35,30 +35,18 @@ fun TeleDriveNavHost(
             LoginScreen(
                 onLoginSuccess = {
                     securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.STORAGE_SELECTION)
-                    navController.navigate(Route.StorageSelection()) {
+                    navController.navigate(Route.StorageSelection) {
                         popUpTo(Route.Login) { inclusive = true }
                     }
                 }
             )
         }
 
-        composable<Route.StorageSelection> { backStackEntry ->
-            val route = backStackEntry.toRoute<Route.StorageSelection>()
+        composable<Route.StorageSelection> {
             StorageSelectionScreen(
-                isFromSettings = route.isFromSettings,
                 onContinue = { isSyncMode ->
-                    if (route.isFromSettings) {
-                        if (isSyncMode) {
-                            navController.navigate(Route.MasterPassword(isSyncMode = true)) {
-                                popUpTo<Route.StorageSelection> { inclusive = true }
-                            }
-                        } else {
-                            navController.popBackStack()
-                        }
-                    } else {
-                        navController.navigate(Route.MasterPassword(isSyncMode = isSyncMode)) {
-                            popUpTo<Route.StorageSelection> { inclusive = true }
-                        }
+                    navController.navigate(Route.MasterPassword(isSyncMode = isSyncMode)) {
+                        popUpTo<Route.StorageSelection> { inclusive = true }
                     }
                 }
             )
@@ -69,25 +57,18 @@ fun TeleDriveNavHost(
             MasterPasswordScreen(
                 isSyncMode = masterPasswordRoute.isSyncMode,
                 onUnlocked = {
-                    if (isFirstTimeSetup) {
-                        if (masterPasswordRoute.isSyncMode) {
-                            navController.navigate(Route.SyncProgress(isFromSettings = false)) {
-                                popUpTo<Route.MasterPassword> { inclusive = true }
-                            }
-                        } else {
-                            navController.navigate(Route.SecurityPreferences) {
-                                popUpTo<Route.MasterPassword> { inclusive = true }
-                            }
+                    if (securePrefs.getSetupStep() == com.sinxn.teledrive.data.local.prefs.SetupStep.COMPLETED) {
+                        navController.navigate(Route.Home) {
+                            popUpTo<Route.MasterPassword> { inclusive = true }
+                        }
+                    } else if (masterPasswordRoute.isSyncMode) {
+                        navController.navigate(Route.SyncProgress) {
+                            popUpTo<Route.MasterPassword> { inclusive = true }
                         }
                     } else {
-                        if (masterPasswordRoute.isSyncMode) {
-                            navController.navigate(Route.SyncProgress(isFromSettings = true)) {
-                                popUpTo<Route.MasterPassword> { inclusive = true }
-                            }
-                        } else {
-                            navController.navigate(Route.Home) {
-                                popUpTo<Route.MasterPassword> { inclusive = true }
-                            }
+                        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
+                        navController.navigate(Route.SecurityPreferences) {
+                            popUpTo<Route.MasterPassword> { inclusive = true }
                         }
                     }
                 }
@@ -105,17 +86,12 @@ fun TeleDriveNavHost(
             )
         }
 
-        composable<Route.SyncProgress> { backStackEntry ->
-            val route = backStackEntry.toRoute<Route.SyncProgress>()
+        composable<Route.SyncProgress> {
             SyncProgressScreen(
                 onContinue = {
-                    if (route.isFromSettings) {
-                        navController.popBackStack()
-                    } else {
-                        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
-                        navController.navigate(Route.SecurityPreferences) {
-                            popUpTo<Route.SyncProgress> { inclusive = true }
-                        }
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.SECURITY_PREFERENCES)
+                    navController.navigate(Route.SecurityPreferences) {
+                        popUpTo<Route.SyncProgress> { inclusive = true }
                     }
                 }
             )
@@ -136,7 +112,8 @@ fun TeleDriveNavHost(
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToStorageSelection = {
-                    navController.navigate(Route.StorageSelection(isFromSettings = true))
+                    securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.STORAGE_SELECTION)
+                    navController.navigate(Route.StorageSelection)
                 },
                 onNavigateToBackup = {
                     navController.navigate(Route.Backup)

@@ -16,7 +16,7 @@ sealed interface Route {
 
     @Keep
     @Serializable
-    data class StorageSelection(val isFromSettings: Boolean = false) : Route
+    data object StorageSelection : Route
 
     @Keep
     @Serializable
@@ -40,7 +40,7 @@ sealed interface Route {
 
     @Keep
     @Serializable
-    data class SyncProgress(val isFromSettings: Boolean = false) : Route
+    data object SyncProgress : Route
 
     @Keep
     @Serializable

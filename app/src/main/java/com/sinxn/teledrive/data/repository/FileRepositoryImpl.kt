@@ -118,6 +118,11 @@ class FileRepositoryImpl @Inject constructor(
                         handleCompletedDownload(file)
                     }
                     is TdApi.UpdateNewMessage -> {
+                        val caption = (update.message.content as? TdApi.MessageDocument)?.caption?.text
+                        if (caption == MetadataManager.METADATA_CAPTION) {
+                            return@collect
+                        }
+
                         val activeUserId = securePrefs.getUserId()
                         if (activeUserId != null) {
                             val configuredChatId = securePrefs.getStorageChannelId()
@@ -133,28 +138,38 @@ class FileRepositoryImpl @Inject constructor(
                             if (update.message.chatId == targetChatId) {
                                 val entity = update.message.toFileEntity(activeUserId)
                                 if (entity != null) {
-                                // Strip .enc extension and restore original metadata if this was our upload
-                                val meta = dequeueUploadMeta(entity.localName())
-                                val cleanEntity = if (meta != null) {
-                                    entity.copy(
-                                        name = meta.originalName,
-                                        mimeType = meta.mimeType
-                                    )
-                                } else entity // MessageMapper already strips .enc suffix
+                                    // Strip .enc extension and restore original metadata if this was our upload
+                                    val meta = dequeueUploadMeta(entity.localName())
+                                    val cleanEntity = if (meta != null) {
+                                        entity.copy(
+                                            name = meta.originalName,
+                                            mimeType = meta.mimeType
+                                        )
+                                    } else entity // MessageMapper already strips .enc suffix
 
-                                // Re-attach parent folder mapping using the ORIGINAL name
-                                val parentId = dequeuePendingParent(entity.localName())
-                                val entityToInsert = if (parentId != null) {
-                                    cleanEntity.copy(parentId = parentId)
-                                } else cleanEntity
+                                    // Re-attach parent folder mapping using the ORIGINAL name
+                                    val parentId = dequeuePendingParent(entity.localName())
+                                    val entityToInsert = if (parentId != null) {
+                                        cleanEntity.copy(parentId = parentId)
+                                    } else cleanEntity
 
-                                fileDao.insertFile(entityToInsert)
-                            }
+                                    fileDao.insertFile(entityToInsert)
+                                }
                             }
                         }
                     }
                     is TdApi.UpdateMessageSendSucceeded -> {
                         val activeUserId = securePrefs.getUserId() ?: return@collect
+
+                        // Check if the sent message is the vault metadata message
+                        val caption = (update.message.content as? TdApi.MessageDocument)?.caption?.text
+                        if (caption == MetadataManager.METADATA_CAPTION || update.oldMessageId == securePrefs.getMetadataMessageId()) {
+                            securePrefs.setMetadataMessageId(update.message.id)
+                            metadataManager.clearCache()
+                            Log.d("FileRepositoryImpl", "Updated metadata message ID in securePrefs to permanent server ID: ${update.message.id}")
+                            return@collect
+                        }
+
                         val oldId = "msg_${update.oldMessageId}"
                         
                         // Fetch the temporary record to preserve its folder context (parentId)
@@ -528,6 +543,7 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun initializeVault(userId: String) {
         metadataMutex.withLock {
             try {
+                fileDao.deleteAllFiles()
                 val chatId = resolveTargetChatId(userId)
                 val newMsgId = metadataManager.initializeMetadataMessage(chatId)
                 securePrefs.setMetadataMessageId(newMsgId)

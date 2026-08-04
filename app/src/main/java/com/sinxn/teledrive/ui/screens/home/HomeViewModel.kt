@@ -6,8 +6,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.repository.CheckStoredMetadataResult
 import com.sinxn.teledrive.data.repository.DownloadEvent
 import com.sinxn.teledrive.data.repository.FileRepository
+import com.sinxn.teledrive.data.repository.MetadataManager
 import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
@@ -40,6 +42,7 @@ class HomeViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val securePrefs: SecurePrefs,
     private val authManager: AuthManager,
+    private val metadataManager: MetadataManager,
     private val application: Application
 ) : ViewModel() {
 
@@ -173,6 +176,14 @@ class HomeViewModel @Inject constructor(
                 }
                 if (finalAuthState is AuthState.Error) {
                     _uiState.value = HomeUiState.Error("Authentication error: ${finalAuthState.message}")
+                    return@launch
+                }
+
+                // Check stored metadata message on app launch
+                val metadataCheck = metadataManager.checkStoredMetadataMessage()
+                if (metadataCheck is CheckStoredMetadataResult.NotFound) {
+                    val msgIdStr = metadataCheck.messageId?.let { " (ID: $it)" } ?: ""
+                    _uiState.value = HomeUiState.Error("Vault metadata message not found$msgIdStr: ${metadataCheck.reason}")
                     return@launch
                 }
 
