@@ -32,6 +32,32 @@ fun StorageSelectionScreen(
     modifier: Modifier = Modifier,
     viewModel: StorageSelectionViewModel = hiltViewModel()
 ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Choose Storage") }
+            )
+        }
+    ) { innerPadding ->
+        StorageSelectionContent(
+            onContinue = onContinue,
+            modifier = modifier.padding(innerPadding),
+            viewModel = viewModel
+        )
+    }
+}
+
+/**
+ * Extracted content composable for storage selection.
+ * Can be used standalone inside a Scaffold or embedded into the Setup Wizard.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StorageSelectionContent(
+    onContinue: (isSyncMode: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: StorageSelectionViewModel = hiltViewModel()
+) {
     val selectedChannelName by viewModel.selectedChannelName.collectAsState()
     val selectedChannelKind by viewModel.selectedChannelKind.collectAsState()
     val selectedChannelPhotoPath by viewModel.selectedChannelPhotoPath.collectAsState()
@@ -39,59 +65,16 @@ fun StorageSelectionScreen(
     var isCheckingVault by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Choose Storage") }
-            )
-        },
-        bottomBar = {
-            Surface(tonalElevation = 3.dp) {
-                Button(
-                    onClick = {
-                        isCheckingVault = true
-                        errorMessage = null
-                        viewModel.validateStorageLocation { validation ->
-                            isCheckingVault = false
-                            when (validation) {
-                                is com.sinxn.teledrive.data.repository.StorageValidation.Empty -> {
-                                    viewModel.saveSetupProgress(false)
-                                    onContinue(false)
-                                }
-                                is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault -> {
-                                    viewModel.saveSetupProgress(true)
-                                    onContinue(true)
-                                }
-                                is com.sinxn.teledrive.data.repository.StorageValidation.Invalid -> {
-                                    errorMessage = "This location contains existing non-TeleDrive messages. Please select an empty chat or a valid TeleDrive vault."
-                                }
-                            }
-                        }
-                    },
-                    enabled = !isCheckingVault,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
-                        .navigationBarsPadding()
-                ) {
-                    if (isCheckingVault) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text("Continue")
-                    }
-                }
-            }
-        }
-    ) { innerPadding ->
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Main content (centered)
         Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 24.dp),
+            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -204,16 +187,55 @@ fun StorageSelectionScreen(
             }
         }
 
-        if (showChannelPicker) {
-            StoragePickerBottomSheet(
-                viewModel = viewModel,
-                onDismiss = { showChannelPicker = false },
-                onChannelSelected = { id, title, kind ->
-                    viewModel.selectChannel(id, title, kind)
-                    showChannelPicker = false
+        // Bottom button
+        Button(
+            onClick = {
+                isCheckingVault = true
+                errorMessage = null
+                viewModel.validateStorageLocation { validation ->
+                    isCheckingVault = false
+                    when (validation) {
+                        is com.sinxn.teledrive.data.repository.StorageValidation.Empty -> {
+                            viewModel.saveSetupProgress(false)
+                            onContinue(false)
+                        }
+                        is com.sinxn.teledrive.data.repository.StorageValidation.ExistingVault -> {
+                            viewModel.saveSetupProgress(true)
+                            onContinue(true)
+                        }
+                        is com.sinxn.teledrive.data.repository.StorageValidation.Invalid -> {
+                            errorMessage = "This location contains existing non-TeleDrive messages. Please select an empty chat or a valid TeleDrive vault."
+                        }
+                    }
                 }
-            )
+            },
+            enabled = !isCheckingVault,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 0.dp, vertical = 16.dp)
+                .navigationBarsPadding()
+        ) {
+            if (isCheckingVault) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text("Continue")
+            }
         }
+    }
+
+    if (showChannelPicker) {
+        StoragePickerBottomSheet(
+            viewModel = viewModel,
+            onDismiss = { showChannelPicker = false },
+            onChannelSelected = { id, title, kind ->
+                viewModel.selectChannel(id, title, kind)
+                showChannelPicker = false
+            }
+        )
     }
 }
 
@@ -288,7 +310,7 @@ private fun StoragePickerBottomSheet(
 }
 
 @Composable
-private fun StorageLocationAvatar(
+internal fun StorageLocationAvatar(
     photoPath: String?,
     kind: StorageLocationKind,
     modifier: Modifier = Modifier
@@ -330,3 +352,4 @@ private fun StorageLocationAvatar(
         }
     }
 }
+

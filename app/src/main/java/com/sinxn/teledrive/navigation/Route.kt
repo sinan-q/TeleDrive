@@ -20,11 +20,11 @@ sealed interface Route {
 
     @Keep
     @Serializable
-    data class MasterPassword(val isSyncMode: Boolean = false) : Route
+    data object SetupWizard : Route
 
     @Keep
     @Serializable
-    data object SecurityPreferences : Route
+    data object LockScreen : Route
 
     @Keep
     @Serializable
@@ -37,10 +37,6 @@ sealed interface Route {
     @Keep
     @Serializable
     data object Backup : Route
-
-    @Keep
-    @Serializable
-    data object SyncProgress : Route
 
     @Keep
     @Serializable

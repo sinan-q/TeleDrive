@@ -24,11 +24,7 @@ fun SecurityPreferencesScreen(
     modifier: Modifier = Modifier,
     viewModel: SecurityPreferencesViewModel = hiltViewModel()
 ) {
-    val authOnLaunch by viewModel.authOnLaunch.collectAsState()
-    val biometricUnlock by viewModel.biometricUnlock.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -38,27 +34,58 @@ fun SecurityPreferencesScreen(
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
-                Button(
-                    onClick = onContinue,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
-                        .navigationBarsPadding()
-                ) {
-                    Text("Continue")
-                }
+            Button(
+                onClick = onContinue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+                    .navigationBarsPadding()
+            ) {
+                Text("Continue")
             }
         }
     ) { innerPadding ->
+        SecurityPreferencesContent(
+            onContinue = onContinue,
+            modifier = modifier.padding(innerPadding),
+            viewModel = viewModel
+        )
+    }
+}
+
+/**
+ * Extracted content composable for security preferences.
+ * Can be used standalone inside a Scaffold or embedded into the Setup Wizard.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SecurityPreferencesContent(
+    onContinue: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: SecurityPreferencesViewModel = hiltViewModel()
+) {
+    val authOnLaunch by viewModel.authOnLaunch.collectAsState()
+    val biometricUnlock by viewModel.biometricUnlock.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Main content (centered)
         Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 24.dp),
+            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Snackbar host
+            SnackbarHost(snackbarHostState)
+
             Icon(
                 imageVector = Icons.Default.Security,
                 contentDescription = null,
@@ -173,6 +200,17 @@ fun SecurityPreferencesScreen(
                     }
                 }
             }
+        }
+
+        // Bottom button
+        Button(
+            onClick = onContinue,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+                .navigationBarsPadding()
+        ) {
+            Text("Continue")
         }
     }
 }

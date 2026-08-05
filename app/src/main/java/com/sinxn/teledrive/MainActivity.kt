@@ -46,7 +46,6 @@ class MainActivity : FragmentActivity() {
                 val hasMasterPassword = encryptionManager.isPasswordSetUp()
                 val authOnLaunch = securePrefs.isAuthOnLaunchEnabled()
                 val setupStep = securePrefs.getSetupStep()
-                val isSyncMode = securePrefs.isSyncMode()
 
                 val startDest: Route
                 val isFirstTimeSetup: Boolean
@@ -57,24 +56,12 @@ class MainActivity : FragmentActivity() {
                         startDest = Route.Login
                         isFirstTimeSetup = true
                     }
-                    // Setup in progress: Storage Selection
-                    setupStep == SetupStep.STORAGE_SELECTION -> {
-                        startDest = Route.StorageSelection
-                        isFirstTimeSetup = true
-                    }
-                    // Setup in progress: Master Password
-                    setupStep == SetupStep.MASTER_PASSWORD -> {
-                        startDest = Route.MasterPassword(isSyncMode = isSyncMode)
-                        isFirstTimeSetup = true
-                    }
-                    // Setup in progress: Syncing files from Telegram
-                    setupStep == SetupStep.SYNC_PROGRESS -> {
-                        startDest = Route.SyncProgress
-                        isFirstTimeSetup = true
-                    }
-                    // Setup in progress: Security Preferences
+                    // Setup in progress: any incomplete step -> Setup Wizard
+                    setupStep == SetupStep.STORAGE_SELECTION ||
+                    setupStep == SetupStep.MASTER_PASSWORD ||
+                    setupStep == SetupStep.SYNC_PROGRESS ||
                     setupStep == SetupStep.SECURITY_PREFERENCES -> {
-                        startDest = Route.SecurityPreferences
+                        startDest = Route.SetupWizard
                         isFirstTimeSetup = true
                     }
                     // Setup completed: has master password + auth disabled -> auto-unlock, go to Home
@@ -92,18 +79,18 @@ class MainActivity : FragmentActivity() {
                             isFirstTimeSetup = false
                         } else {
                             securePrefs.clearAutoUnlockSecret()
-                            startDest = Route.MasterPassword()
+                            startDest = Route.LockScreen
                             isFirstTimeSetup = false
                         }
                     }
-                    // Setup completed: has master password + auth enabled -> show MasterPassword screen
+                    // Setup completed: has master password + auth enabled -> show LockScreen
                     hasMasterPassword -> {
-                        startDest = Route.MasterPassword()
+                        startDest = Route.LockScreen
                         isFirstTimeSetup = false
                     }
                     // Fallback
                     else -> {
-                        startDest = Route.StorageSelection
+                        startDest = Route.SetupWizard
                         isFirstTimeSetup = true
                     }
                 }
