@@ -42,6 +42,7 @@ class SetupWizardViewModel @Inject constructor(
      */
     fun advanceFromStorageSelection(isSyncMode: Boolean) {
         _isSyncMode.value = isSyncMode
+        securePrefs.setSyncMode(isSyncMode)
         _currentStep.value = SetupStep.MASTER_PASSWORD
         securePrefs.setSetupStep(SetupStep.MASTER_PASSWORD)
     }

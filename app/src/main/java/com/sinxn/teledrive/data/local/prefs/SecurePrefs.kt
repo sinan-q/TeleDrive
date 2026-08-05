@@ -212,8 +212,6 @@ class SecurePrefsImpl @Inject constructor(
                 .remove(KEY_MASTER_PW_SALT)
                 .remove(KEY_AUTO_UNLOCK_SECRET)
                 .remove(KEY_BIOMETRIC_UNLOCK_SECRET)
-                .remove(KEY_SETUP_STEP)
-                .remove(KEY_IS_SYNC_MODE)
         }
     }
 

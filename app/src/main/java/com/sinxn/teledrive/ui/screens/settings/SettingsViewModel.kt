@@ -218,6 +218,8 @@ class SettingsViewModel @Inject constructor(
         disableBiometricUnlock()
         securePrefs.clearAutoUnlockSecret()
         securePrefs.clearMasterPassword()
+        securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.LOGIN)
+        securePrefs.setSyncMode(false)
         securePrefs.setAuthOnLaunch(false)
         _authOnLaunch.value = false
         securePrefs.setStorageChannelId(null)
