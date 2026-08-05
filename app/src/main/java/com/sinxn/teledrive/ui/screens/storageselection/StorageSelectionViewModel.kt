@@ -19,6 +19,26 @@ class StorageSelectionViewModel @Inject constructor(
     private val metadataManager: com.sinxn.teledrive.data.repository.MetadataManager
 ) : ViewModel() {
 
+    private val selectedChannelId: Long?
+        get() = securePrefs.getStorageChannelId()
+
+    private val _selectedChannelName = MutableStateFlow(
+        securePrefs.getStorageChannelName() ?: "Saved Messages"
+    )
+    val selectedChannelName: StateFlow<String> = _selectedChannelName.asStateFlow()
+
+    private val _selectedChannelKind = MutableStateFlow(StorageLocationKind.SavedMessages)
+    val selectedChannelKind: StateFlow<StorageLocationKind> = _selectedChannelKind.asStateFlow()
+
+    private val _selectedChannelPhotoPath = MutableStateFlow<String?>(null)
+    val selectedChannelPhotoPath: StateFlow<String?> = _selectedChannelPhotoPath.asStateFlow()
+
+    private val _chats = MutableStateFlow<List<StorageLocationOption>>(emptyList())
+    val chats: StateFlow<List<StorageLocationOption>> = _chats.asStateFlow()
+
+    private val _isSearchLoading = MutableStateFlow(false)
+    val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
+
     init {
         metadataManager.clearCache()
         observeFileUpdates()
@@ -64,31 +84,6 @@ class StorageSelectionViewModel @Inject constructor(
     fun saveSetupProgress(isSyncMode: Boolean) {
         securePrefs.setSyncMode(isSyncMode)
         securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.MASTER_PASSWORD)
-    }
-
-    private val selectedChannelId: Long?
-        get() = securePrefs.getStorageChannelId()
-
-    private val _selectedChannelName = MutableStateFlow(
-        securePrefs.getStorageChannelName() ?: "Saved Messages"
-    )
-    val selectedChannelName: StateFlow<String> = _selectedChannelName.asStateFlow()
-
-    private val _selectedChannelKind = MutableStateFlow(StorageLocationKind.SavedMessages)
-    val selectedChannelKind: StateFlow<StorageLocationKind> = _selectedChannelKind.asStateFlow()
-
-    private val _selectedChannelPhotoPath = MutableStateFlow<String?>(null)
-    val selectedChannelPhotoPath: StateFlow<String?> = _selectedChannelPhotoPath.asStateFlow()
-
-    private val _chats = MutableStateFlow<List<StorageLocationOption>>(emptyList())
-    val chats: StateFlow<List<StorageLocationOption>> = _chats.asStateFlow()
-
-    private val _isSearchLoading = MutableStateFlow(false)
-    val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
-
-    init {
-        observeFileUpdates()
-        refreshSelectedChannel()
     }
 
     private fun observeFileUpdates() {
