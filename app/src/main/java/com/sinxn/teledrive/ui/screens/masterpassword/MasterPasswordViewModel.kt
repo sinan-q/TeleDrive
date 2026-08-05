@@ -41,7 +41,7 @@ class MasterPasswordViewModel @Inject constructor(
 ) : ViewModel() {
 
     /** True when the user chose "Sync existing files" in Storage Selection */
-    val isSyncMode: Boolean = savedStateHandle.get<Boolean>("isSyncMode") ?: false
+    val isSyncMode: Boolean = savedStateHandle.get<Boolean>("isSyncMode") ?: securePrefs.isSyncMode()
 
     private val _uiState = MutableStateFlow<MasterPasswordUiState>(MasterPasswordUiState.Idle)
     val uiState: StateFlow<MasterPasswordUiState> = _uiState.asStateFlow()

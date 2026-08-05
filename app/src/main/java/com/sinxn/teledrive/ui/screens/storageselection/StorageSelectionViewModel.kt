@@ -12,11 +12,14 @@ import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
 
+import com.sinxn.teledrive.data.crypto.EncryptionManager
+
 @HiltViewModel
 class StorageSelectionViewModel @Inject constructor(
     private val securePrefs: SecurePrefs,
     private val telegramClient: TelegramClient,
-    private val metadataManager: com.sinxn.teledrive.data.repository.MetadataManager
+    private val metadataManager: com.sinxn.teledrive.data.repository.MetadataManager,
+    private val encryptionManager: EncryptionManager
 ) : ViewModel() {
 
     private val selectedChannelId: Long?
@@ -83,6 +86,8 @@ class StorageSelectionViewModel @Inject constructor(
 
     fun saveSetupProgress(isSyncMode: Boolean) {
         securePrefs.setSyncMode(isSyncMode)
+        securePrefs.clearMasterPassword()
+        encryptionManager.lock()
         securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.MASTER_PASSWORD)
     }
 
@@ -189,6 +194,8 @@ class StorageSelectionViewModel @Inject constructor(
         securePrefs.setMetadataMessageId(null)
         securePrefs.clearAutoUnlockSecret()
         securePrefs.clearBiometricUnlockSecret()
+        securePrefs.clearMasterPassword()
+        encryptionManager.lock()
         if (id == 0L) {
             securePrefs.setStorageChannelId(null)
             securePrefs.setStorageChannelName(null)

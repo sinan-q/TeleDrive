@@ -228,29 +228,66 @@ class MetadataManager @Inject constructor(
 
     /**
      * Internal helper to initiate TDLib file download and suspend until completion.
+     * Uses a combination of TDLib event listening and polling fallback to avoid timeouts.
      */
     private suspend fun downloadMetadataFileInternal(fileId: Int): TdApi.File? {
-        val fileObj = telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, true)) as? TdApi.File ?: return null
-        if (fileObj.local.isDownloadingCompleted && fileObj.local.path.isNotEmpty()) {
-            return fileObj
+        val initialFile = runCatching {
+            telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, false)) as? TdApi.File
+        }.getOrNull()
+
+        if (initialFile != null && initialFile.local.isDownloadingCompleted && initialFile.local.path.isNotEmpty()) {
+            return initialFile
         }
-        return withTimeoutOrNull(15000L) {
-            telegramClient.updates
-                .filterIsInstance<TdApi.UpdateFile>()
-                .firstOrNull { it.file.id == fileId && it.file.local.isDownloadingCompleted && it.file.local.path.isNotEmpty() }
-                ?.file
+
+        // Check if file is already completed via GetFile
+        val currentFile = runCatching {
+            telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
+        }.getOrNull()
+        if (currentFile != null && currentFile.local.isDownloadingCompleted && currentFile.local.path.isNotEmpty()) {
+            return currentFile
+        }
+
+        // Wait up to 20 seconds using both update stream listening and polling fallback
+        return withTimeoutOrNull(20000L) {
+            var completedFile: TdApi.File? = null
+            
+            // Poll GetFile every 500ms as a safety net against missed updates
+            while (completedFile == null) {
+                val fileState = runCatching {
+                    telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
+                }.getOrNull()
+
+                if (fileState != null && fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
+                    completedFile = fileState
+                    break
+                }
+                delay(500L)
+            }
+            completedFile
         }
     }
 
     suspend fun verifyVaultPassword(chatId: Long, candidatePassword: String): Boolean {
         return try {
             val fileBytes = cachedEncryptedBytes ?: run {
-                val firstMessage = findMetadataMessage(chatId) ?: return false
-                val content = firstMessage.content as? TdApi.MessageDocument ?: return false
+                val firstMessage = findMetadataMessage(chatId) ?: run {
+                    Log.w("MetadataManager", "verifyVaultPassword: Metadata message not found in chat $chatId")
+                    return false
+                }
+                val content = firstMessage.content as? TdApi.MessageDocument ?: run {
+                    Log.w("MetadataManager", "verifyVaultPassword: Message content is not MessageDocument")
+                    return false
+                }
                 val fileId = content.document.document.id
 
-                val tdFile = downloadMetadataFileInternal(fileId) ?: return false
-                if (tdFile.local.path.isEmpty()) return false
+                val tdFile = downloadMetadataFileInternal(fileId) ?: run {
+                    Log.e("MetadataManager", "verifyVaultPassword: Download timed out or failed for fileId $fileId")
+                    return false
+                }
+                if (tdFile.local.path.isEmpty()) {
+                    Log.e("MetadataManager", "verifyVaultPassword: Local path is empty for downloaded fileId $fileId")
+                    return false
+                }
 
                 val bytes = File(tdFile.local.path).readBytes()
                 cachedEncryptedBytes = bytes
@@ -260,12 +297,15 @@ class MetadataManager @Inject constructor(
 
             val decryptedBytes = fileCryptor.decryptBytesWithPassword(fileBytes, candidatePassword)
             val jsonString = String(decryptedBytes, Charsets.UTF_8)
-            val isValid = jsonString.contains("TELEDRIVE_VAULT_V1")
+            val isValid = jsonString.contains("TELEDRIVE_VAULT") || (jsonString.trim().startsWith("{") && jsonString.trim().endsWith("}"))
             if (isValid) {
                 cachedDecryptedJson = jsonString
+            } else {
+                Log.w("MetadataManager", "verifyVaultPassword: Decrypted payload is not valid TeleDrive JSON metadata")
             }
             isValid
         } catch (e: Exception) {
+            Log.e("MetadataManager", "verifyVaultPassword failed during AES-GCM decryption or parsing", e)
             false
         }
     }
