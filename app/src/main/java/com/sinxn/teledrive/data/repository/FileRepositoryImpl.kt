@@ -89,16 +89,28 @@ class FileRepositoryImpl @Inject constructor(
                         
                         // Upload progress
                         if (file.remote.isUploadingActive && file.expectedSize > 0) {
-                            val progress = file.remote.uploadedSize.toFloat() / file.expectedSize.toFloat()
-                            fileDao.updateTransferProgress(file.id.toString(), progress)
+                            val progress = (file.remote.uploadedSize.toFloat() / file.expectedSize.toFloat()).coerceIn(0f, 1f)
+                            var entityId = pendingDownloadEntityIds[file.id]
+                            if (entityId == null) {
+                                entityId = fileDao.getFileByFileId(file.id.toString())?.id
+                                if (entityId != null) {
+                                    pendingDownloadEntityIds[file.id] = entityId
+                                }
+                            }
+                            if (entityId != null) {
+                                _downloadEvents.tryEmit(DownloadEvent.Progress(entityId, progress, "Uploading to Telegram..."))
+                            }
                         } else if (file.remote.isUploadingCompleted) {
-                            fileDao.updateTransferProgress(file.id.toString(), 1.0f)
+                            val entityId = pendingDownloadEntityIds.remove(file.id)
+                            if (entityId != null) {
+                                _downloadEvents.tryEmit(DownloadEvent.Progress(entityId, 1.0f, "Finalizing..."))
+                            }
                         }
 
                         // Download progress
                         if (pendingDownloads.contains(file.id)) {
-                            val totalBytes = maxOf(file.expectedSize.toLong(), file.size.toLong())
-                            val downloaded = file.local.downloadedPrefixSize.toLong()
+                            val totalBytes = maxOf(file.expectedSize, file.size)
+                            val downloaded = file.local.downloadedPrefixSize
                             val progress = when {
                                 totalBytes > 0L -> (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
                                 file.local.isDownloadingActive || downloaded > 0L -> 0.01f
@@ -109,7 +121,6 @@ class FileRepositoryImpl @Inject constructor(
                                 file.local.isDownloadingActive || downloaded > 0L -> "Downloading from Telegram..."
                                 else -> "Preparing download..."
                             }
-                            fileDao.updateTransferProgress(file.id.toString(), progress)
                             pendingDownloadEntityIds[file.id]?.let { entityId ->
                                 _downloadEvents.tryEmit(DownloadEvent.Progress(entityId, progress, phaseMessage))
                             }
@@ -153,6 +164,11 @@ class FileRepositoryImpl @Inject constructor(
                                         cleanEntity.copy(parentId = parentId)
                                     } else cleanEntity
 
+                                    entityToInsert.fileId?.toIntOrNull()?.let { fileIdInt ->
+                                        pendingDownloadEntityIds[fileIdInt] = entityToInsert.id
+                                        _downloadEvents.tryEmit(DownloadEvent.Progress(entityToInsert.id, 0.01f, "Uploading to Telegram..."))
+                                    }
+
                                     fileDao.insertFile(entityToInsert)
                                 }
                             }
@@ -171,6 +187,7 @@ class FileRepositoryImpl @Inject constructor(
                         }
 
                         val oldId = "msg_${update.oldMessageId}"
+                        _downloadEvents.tryEmit(DownloadEvent.Progress(oldId, 1.0f, "Finalizing..."))
                         
                         // Fetch the temporary record to preserve its folder context (parentId)
                         val oldEntity = fileDao.getFileById(oldId)
@@ -369,7 +386,6 @@ class FileRepositoryImpl @Inject constructor(
 
             pendingDownloads.add(fileId)
             pendingDownloadEntityIds[fileId] = resolvedFile.id
-            fileDao.updateTransferProgressById(resolvedFile.id, 0.01f)
             _downloadEvents.emit(DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Checking cache..."))
             _downloadEvents.emit(DownloadEvent.Progress(resolvedFile.id, 0.01f, "Checking cache..."))
 
@@ -377,9 +393,6 @@ class FileRepositoryImpl @Inject constructor(
                 if (result is TdApi.Error) {
                     pendingDownloads.remove(fileId)
                     pendingDownloadEntityIds.remove(fileId)
-                    scope.launch {
-                        fileDao.updateTransferProgressById(resolvedFile.id, 1f)
-                    }
                     Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
                     _downloadEvents.tryEmit(
                         DownloadEvent.Failure(resolvedFile.id, resolvedFile.name, result.message ?: "Failed to start download")
@@ -409,7 +422,6 @@ class FileRepositoryImpl @Inject constructor(
         val entityId = pendingDownloadEntityIds.remove(file.id)
 
         scope.launch {
-            fileDao.updateTransferProgress(file.id.toString(), 1.0f)
             entityId?.let { _downloadEvents.emit(DownloadEvent.Progress(it, 1.0f, "Finalizing...")) }
             val fileEntity = fileDao.getFileByFileId(file.id.toString())
             if (fileEntity == null) {
@@ -496,11 +508,7 @@ class FileRepositoryImpl @Inject constructor(
                 }
             }
 
-            chunks.forEach { chunk ->
-                chunk.fileId?.let { id ->
-                    fileDao.updateTransferProgress(id, 1.0f)
-                }
-            }
+
 
             val exportMimeType = file.mimeType ?: "application/octet-stream"
             _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Saving to Downloads..."))
@@ -584,7 +592,7 @@ class FileRepositoryImpl @Inject constructor(
                             id = existingFile.id,
                             messageId = result.id.toString(),
                             fileId = doc.document.id.toString(),
-                            size = doc.document.expectedSize.toLong(),
+                            size = doc.document.expectedSize,
                             mimeType = existingFile.mimeType,  // preserve original mime type
                             chatId = result.chatId,
                             updatedAt = System.currentTimeMillis(),
