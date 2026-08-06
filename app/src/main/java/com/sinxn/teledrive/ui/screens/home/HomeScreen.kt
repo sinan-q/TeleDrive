@@ -81,11 +81,26 @@ fun HomeScreen(
         }
     }
 
-    // Launcher for Android System File Picker
+    // Launcher for Android System File Picker (upload)
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { viewModel.onFileSelectedForUpload(it) }
+    }
+
+    // Launcher for file replacement picker
+    val replacePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.onReplacementFilePicked(it) }
+    }
+
+    // Observe fileToReplace — launch picker when a file is targeted for replacement
+    val fileToReplace by viewModel.fileToReplace.collectAsState()
+    LaunchedEffect(fileToReplace) {
+        if (fileToReplace != null) {
+            replacePickerLauncher.launch("*/*")
+        }
     }
 
     Scaffold(
@@ -189,6 +204,9 @@ fun HomeScreen(
                                     },
                                     onMoveClick = { file ->
                                         fileToMove = file
+                                    },
+                                    onReplaceClick = { file ->
+                                        viewModel.startReplaceFlow(file)
                                     }
                                 )
                             } else {
@@ -215,6 +233,9 @@ fun HomeScreen(
                                     },
                                     onMoveClick = { file ->
                                         fileToMove = file
+                                    },
+                                    onReplaceClick = { file ->
+                                        viewModel.startReplaceFlow(file)
                                     }
                                 )
                             }

@@ -540,6 +540,124 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun getFolders(userId: String): List<FileEntity> =
         fileDao.getFoldersByUser(userId)
 
+    override suspend fun replaceFile(existingFile: FileEntity, newContentUri: Uri) {
+        withContext(Dispatchers.IO) {
+            val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, newContentUri)
+            val targetChatId = resolveTargetChatId(existingFile.userId)
+
+            _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Encrypting replacement..."))
+
+            // Multipart files: delete all old chunks then re-upload
+            if (existingFile.isMultipart && !existingFile.originalFileName.isNullOrBlank()) {
+                replaceMultipartFile(existingFile, newContentUri, pickedFile, targetChatId)
+                return@withContext
+            }
+
+            val messageId = existingFile.messageId?.toLongOrNull()
+                ?: error("Cannot replace file without a Telegram message ID")
+
+            // 1. Encrypt the new content
+            val tempDir = java.io.File(context.cacheDir, "replace_${java.util.UUID.randomUUID()}").apply { mkdirs() }
+            val encFileName = "${existingFile.name}.enc"
+            val encFile = java.io.File(tempDir, encFileName)
+
+            try {
+                context.contentResolver.openInputStream(newContentUri)?.use { stream ->
+                    fileCryptor.encryptStream(stream, encFile)
+                } ?: error("Could not open replacement file")
+
+                // 2. EditMessageMedia — swap the document in-place
+                val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
+                val inputContent = TdApi.InputMessageDocument(inputFile, null, true, null)
+
+                _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
+
+                val result = telegramClient.send(
+                    TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
+                )
+
+                // 3. Handle result
+                if (result is TdApi.Message) {
+                    val doc = (result.content as? TdApi.MessageDocument)?.document
+                    if (doc != null) {
+                        fileDao.updateFileContent(
+                            id = existingFile.id,
+                            messageId = result.id.toString(),
+                            fileId = doc.document.id.toString(),
+                            size = doc.document.expectedSize.toLong(),
+                            mimeType = existingFile.mimeType,  // preserve original mime type
+                            chatId = result.chatId,
+                            updatedAt = System.currentTimeMillis(),
+                            isMultipart = false,
+                            partIndex = null,
+                            totalParts = null,
+                            originalFileName = null
+                        )
+                    }
+                    saveMetadataRemote(existingFile.userId)
+                    _downloadEvents.emit(DownloadEvent.Success(existingFile.id, existingFile.name))
+                    Log.d("FileRepositoryImpl", "Replaced file '${existingFile.name}' via EditMessageMedia (msg $messageId)")
+                } else if (result is TdApi.Error) {
+                    Log.e("FileRepositoryImpl", "EditMessageMedia failed: ${result.message}")
+                    _downloadEvents.emit(
+                        DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: ${result.message}")
+                    )
+                }
+            } finally {
+                encFile.delete()
+                tempDir.delete()
+            }
+        }
+    }
+
+    /**
+     * Handles replacement for multipart (chunked) files.
+     * Deletes all old chunk messages from Telegram, then re-uploads the new content.
+     */
+    private suspend fun replaceMultipartFile(
+        existingFile: FileEntity,
+        newContentUri: Uri,
+        pickedFile: com.sinxn.teledrive.utils.FileUtils.PickedFileMetadata,
+        chatId: Long
+    ) {
+        val originalName = existingFile.originalFileName ?: existingFile.name
+        val chunks = fileDao.getMultipartFiles(existingFile.userId, originalName)
+
+        // 1. Delete all old chunk messages from Telegram
+        val messageIds = chunks.mapNotNull { it.messageId?.toLongOrNull() }.toLongArray()
+        if (messageIds.isNotEmpty()) {
+            try {
+                telegramClient.send(TdApi.DeleteMessages(chatId, messageIds, true))
+                Log.d("FileRepositoryImpl", "Deleted ${messageIds.size} old chunk messages for '$originalName'")
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Failed to delete old chunk messages", e)
+            }
+        }
+
+        // 2. Hard-delete all chunk records from Room
+        for (chunk in chunks) {
+            fileDao.hardDeleteFile(chunk.id)
+        }
+
+        // 3. Upload the new content as a fresh file (preserving folder context)
+        _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
+
+        context.contentResolver.openInputStream(newContentUri)?.use { sourceStream ->
+            uploadEncryptedContainer(
+                sourceStream = sourceStream,
+                chatId = chatId,
+                encryptedFileName = "${existingFile.name}.enc",
+                storedDisplayName = existingFile.name,
+                mimeType = existingFile.mimeType,
+                parentId = existingFile.parentId
+            )
+        } ?: error("Could not open replacement file")
+
+        saveMetadataRemote(existingFile.userId)
+        _downloadEvents.emit(DownloadEvent.Success(existingFile.id, existingFile.name))
+        Log.d("FileRepositoryImpl", "Replaced multipart file '$originalName' (deleted ${messageIds.size} chunks, re-uploaded)")
+    }
+
     override suspend fun initializeVault(userId: String) {
         metadataMutex.withLock {
             try {

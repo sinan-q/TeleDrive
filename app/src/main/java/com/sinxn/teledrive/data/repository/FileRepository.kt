@@ -84,6 +84,13 @@ interface FileRepository {
     suspend fun initializeVault(userId: String)
 
     /**
+     * Replaces the contents of an existing file with new content from the device.
+     * Uses EditMessageMedia to swap the document in-place on Telegram.
+     * Preserves name, parent folder, and creation timestamp.
+     */
+    suspend fun replaceFile(existingFile: FileEntity, newContentUri: Uri)
+
+    /**
      * Observable flow of the current sync status.
      */
     val syncStatus: StateFlow<SyncStatus>

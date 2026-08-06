@@ -65,6 +65,32 @@ class HomeViewModel @Inject constructor(
     private var observeJob: Job? = null
     private var userId: String = ""
 
+    /** The file currently targeted for replacement (drives the replacement file picker). */
+    private val _fileToReplace = MutableStateFlow<FileEntity?>(null)
+    val fileToReplace: StateFlow<FileEntity?> = _fileToReplace.asStateFlow()
+
+    fun startReplaceFlow(file: FileEntity) {
+        _fileToReplace.value = file
+    }
+
+    fun onReplacementFilePicked(uri: Uri) {
+        val target = _fileToReplace.value ?: return
+        _fileToReplace.value = null
+        viewModelScope.launch {
+            try {
+                val activeUserId = userId.takeIf { it.isNotBlank() } ?: securePrefs.getUserId()
+                if (activeUserId.isNullOrBlank()) {
+                    _snackbarEvents.emit("User ID not loaded. Please try again.")
+                    return@launch
+                }
+                fileRepository.replaceFile(target, uri)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error replacing file", e)
+                _snackbarEvents.emit("Replace failed: ${e.message}")
+            }
+        }
+    }
+
     fun onFileSelectedForUpload(uri: Uri) {
         viewModelScope.launch {
             try {

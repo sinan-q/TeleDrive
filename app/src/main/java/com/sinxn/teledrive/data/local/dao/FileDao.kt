@@ -115,6 +115,36 @@ interface FileDao {
     @Query("DELETE FROM files")
     suspend fun deleteAllFiles()
 
+    /** Update file content fields after a replacement (preserves name, parentId, createdAt). */
+    @Query("""
+        UPDATE files 
+        SET message_id = :messageId, 
+            file_id = :fileId, 
+            size = :size, 
+            mime_type = :mimeType, 
+            chat_id = :chatId, 
+            updated_at = :updatedAt, 
+            upload_progress = NULL,
+            is_multipart = :isMultipart,
+            part_index = :partIndex,
+            total_parts = :totalParts,
+            original_file_name = :originalFileName
+        WHERE id = :id
+    """)
+    suspend fun updateFileContent(
+        id: String,
+        messageId: String?,
+        fileId: String?,
+        size: Long?,
+        mimeType: String?,
+        chatId: Long?,
+        updatedAt: Long,
+        isMultipart: Boolean,
+        partIndex: Int?,
+        totalParts: Int?,
+        originalFileName: String?
+    )
+
     // ── Snapshot queries for DocumentsProvider (non-Flow) ───────────
 
     /** One-shot list of children in a folder (null parentId = root). Used by SAF. */
