@@ -96,6 +96,12 @@ interface SecurePrefs {
 
     /** Get the message ID of the metadata message */
     fun getMetadataMessageId(): Long?
+
+    /** Store the exportedAt timestamp from the last successful metadata save to Telegram */
+    fun setLastSyncedExportedAt(timestamp: Long)
+
+    /** Get the exportedAt timestamp from the last successful metadata save */
+    fun getLastSyncedExportedAt(): Long?
 }
 
 /**
@@ -124,6 +130,7 @@ class SecurePrefsImpl @Inject constructor(
         private const val KEY_AUTH_ON_LAUNCH = "key_auth_on_launch"
         private const val KEY_BIOMETRIC_UNLOCK = "key_biometric_unlock"
         private const val KEY_METADATA_MESSAGE_ID = "key_metadata_message_id"
+        private const val KEY_LAST_SYNCED_EXPORTED_AT = "key_last_synced_exported_at"
     }
 
     private val sharedPreferences = createEncryptedPrefs(context)
@@ -312,6 +319,20 @@ class SecurePrefsImpl @Inject constructor(
     override fun getMetadataMessageId(): Long? {
         return if (sharedPreferences.contains(KEY_METADATA_MESSAGE_ID)) {
             sharedPreferences.getLong(KEY_METADATA_MESSAGE_ID, 0L)
+        } else {
+            null
+        }
+    }
+
+    override fun setLastSyncedExportedAt(timestamp: Long) {
+        sharedPreferences.edit {
+            putLong(KEY_LAST_SYNCED_EXPORTED_AT, timestamp)
+        }
+    }
+
+    override fun getLastSyncedExportedAt(): Long? {
+        return if (sharedPreferences.contains(KEY_LAST_SYNCED_EXPORTED_AT)) {
+            sharedPreferences.getLong(KEY_LAST_SYNCED_EXPORTED_AT, 0L)
         } else {
             null
         }

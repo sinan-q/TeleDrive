@@ -663,8 +663,9 @@ class FileRepositoryImpl @Inject constructor(
             try {
                 fileDao.deleteAllFiles()
                 val chatId = resolveTargetChatId(userId)
-                val newMsgId = metadataManager.initializeMetadataMessage(chatId)
+                val (newMsgId, exportedAt) = metadataManager.initializeMetadataMessage(chatId)
                 securePrefs.setMetadataMessageId(newMsgId)
+                securePrefs.setLastSyncedExportedAt(exportedAt)
                 Log.d("FileRepositoryImpl", "Vault initialized with metadata message ID: $newMsgId")
             } catch (e: Exception) {
                 Log.e("FileRepositoryImpl", "Failed to initialize vault metadata", e)
@@ -992,10 +993,12 @@ class FileRepositoryImpl @Inject constructor(
                 }
                 
                 if (messageId != null && messageId != 0L) {
-                    metadataManager.updateMetadataMessage(chatId, messageId)
+                    val exportedAt = metadataManager.updateMetadataMessage(chatId, messageId)
+                    securePrefs.setLastSyncedExportedAt(exportedAt)
                 } else {
-                    val newMsgId = metadataManager.initializeMetadataMessage(chatId)
+                    val (newMsgId, exportedAt) = metadataManager.initializeMetadataMessage(chatId)
                     securePrefs.setMetadataMessageId(newMsgId)
+                    securePrefs.setLastSyncedExportedAt(exportedAt)
                 }
             } catch (e: Exception) {
                 Log.e("FileRepositoryImpl", "Failed to update remote metadata", e)

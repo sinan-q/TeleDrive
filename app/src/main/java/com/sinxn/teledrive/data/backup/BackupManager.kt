@@ -86,7 +86,50 @@ class BackupManager @Inject constructor(
         } else {
             securePrefs.clearUserId()
         }
+
+        securePrefs.setLastSyncedExportedAt(backup.exportedAt)
     }
+
+    /**
+     * Computes the difference between the current local DB state and a remote metadata JSON payload.
+     * Used to show the user what will change before syncing.
+     */
+    suspend fun computeDiff(remoteJson: String): SyncDiff {
+        val remote = json.decodeFromString<BackupDocument>(remoteJson)
+        val localFiles = fileDao.getAllFiles()
+
+        val localById = localFiles.associateBy { it.id }
+        val remoteById = remote.files.associateBy { it.id }
+
+        val addedFiles = remote.files
+            .filter { it.id !in localById }
+            .map { it.name }
+
+        val removedFiles = localFiles
+            .filter { it.id !in remoteById }
+            .map { it.name }
+
+        val modifiedFiles = remote.files
+            .filter { remoteFile ->
+                val localFile = localById[remoteFile.id]
+                localFile != null && remoteFile.updatedAt != localFile.updatedAt
+            }
+            .map { it.name }
+
+        return SyncDiff(
+            addedFiles = addedFiles,
+            removedFiles = removedFiles,
+            modifiedFiles = modifiedFiles
+        )
+    }
+}
+
+data class SyncDiff(
+    val addedFiles: List<String>,
+    val removedFiles: List<String>,
+    val modifiedFiles: List<String>
+) {
+    val hasChanges: Boolean get() = addedFiles.isNotEmpty() || removedFiles.isNotEmpty() || modifiedFiles.isNotEmpty()
 }
 
 @Serializable

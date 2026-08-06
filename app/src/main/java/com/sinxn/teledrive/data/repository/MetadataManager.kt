@@ -34,9 +34,9 @@ class MetadataManager @Inject constructor(
      * Initializes the vault by creating the very first message containing the encrypted metadata.
      * Call this when a user selects a new empty chat for storage.
      * 
-     * @return The message ID of the newly created metadata message.
+     * @return Pair of (messageId, exportedAt timestamp).
      */
-    suspend fun initializeMetadataMessage(chatId: Long): Long {
+    suspend fun initializeMetadataMessage(chatId: Long): Pair<Long, Long> {
         val timestamp = System.currentTimeMillis()
         val jsonPayload = backupManager.generateBackupJson(timestamp)
         val encryptedBytes = fileCryptor.encryptBytes(jsonPayload.toByteArray(Charsets.UTF_8))
@@ -57,7 +57,7 @@ class MetadataManager @Inject constructor(
         
         return if (result is TdApi.Message) {
             Log.d("MetadataManager", "Initialized metadata at message ID: ${result.id}")
-            result.id
+            Pair(result.id, timestamp)
         } else {
             error("Failed to initialize metadata message: ${result.javaClass.simpleName}")
         }
@@ -66,8 +66,10 @@ class MetadataManager @Inject constructor(
     /**
      * Updates an existing metadata message with the latest database state.
      * Uses EditMessageMedia to avoid spamming the chat history.
+     * 
+     * @return The exportedAt timestamp that was used for the metadata payload.
      */
-    suspend fun updateMetadataMessage(chatId: Long, messageId: Long) {
+    suspend fun updateMetadataMessage(chatId: Long, messageId: Long): Long {
         val timestamp = System.currentTimeMillis()
         val jsonPayload = backupManager.generateBackupJson(timestamp)
         val encryptedBytes = fileCryptor.encryptBytes(jsonPayload.toByteArray(Charsets.UTF_8))
@@ -116,6 +118,7 @@ class MetadataManager @Inject constructor(
                     Log.e("MetadataManager", "Retry failed for metadata message $messageId: ${retryResult.message}")
                 } else {
                     Log.d("MetadataManager", "Successfully updated metadata message $messageId after FLOOD_WAIT retry")
+                    return retryTimestamp
                 }
             } else {
                 Log.e("MetadataManager", "Failed to update metadata message $messageId: ${result.message}")
@@ -123,6 +126,7 @@ class MetadataManager @Inject constructor(
         } else {
             Log.d("MetadataManager", "Successfully updated metadata message $messageId")
         }
+        return timestamp
     }
 
     /**
@@ -374,6 +378,78 @@ class MetadataManager @Inject constructor(
             CheckStoredMetadataResult.NotFound(messageId, e.message ?: "Unknown error")
         }
     }
+    /**
+     * Parses the exportedAt timestamp from a metadata document's filename.
+     * Expected formats: "metadata_init_<timestamp>.enc", "metadata_update_<timestamp>.enc",
+     * or "metadata_retry_<timestamp>.enc".
+     */
+    private fun parseTimestampFromFilename(filename: String): Long? {
+        // Extract the numeric part between the last underscore and ".enc"
+        val withoutExt = filename.removeSuffix(".enc")
+        val lastUnderscore = withoutExt.lastIndexOf('_')
+        if (lastUnderscore < 0) return null
+        return withoutExt.substring(lastUnderscore + 1).toLongOrNull()
+    }
+
+    /**
+     * Checks if the remote metadata on Telegram is newer than the local state.
+     * Uses the document filename timestamp to avoid downloading/decrypting the file.
+     */
+    suspend fun checkForRemoteUpdates(): RemoteSyncCheck {
+        val chatId = securePrefs.getStorageChannelId() ?: return RemoteSyncCheck.CheckFailed("No storage channel configured")
+        val messageId = securePrefs.getMetadataMessageId() ?: return RemoteSyncCheck.CheckFailed("No metadata message ID stored")
+
+        return try {
+            val result = telegramClient.send(TdApi.GetMessage(chatId, messageId))
+            if (result !is TdApi.Message) {
+                return RemoteSyncCheck.CheckFailed("Could not fetch metadata message")
+            }
+
+            val doc = result.content as? TdApi.MessageDocument
+                ?: return RemoteSyncCheck.CheckFailed("Message is not a document")
+
+            val filename = doc.document.fileName ?: return RemoteSyncCheck.CheckFailed("Document has no filename")
+            val remoteTimestamp = parseTimestampFromFilename(filename)
+                ?: return RemoteSyncCheck.CheckFailed("Could not parse timestamp from filename: $filename")
+
+            val localTimestamp = securePrefs.getLastSyncedExportedAt()
+
+            Log.d("MetadataManager", "Remote sync check: remote=$remoteTimestamp, local=$localTimestamp")
+
+            when {
+                localTimestamp == null || remoteTimestamp > localTimestamp -> {
+                    RemoteSyncCheck.RemoteNewer(
+                        remoteExportedAt = remoteTimestamp,
+                        localExportedAt = localTimestamp,
+                        metadataFileId = doc.document.document.id
+                    )
+                }
+                remoteTimestamp < localTimestamp -> {
+                    RemoteSyncCheck.LocalNewer(
+                        remoteExportedAt = remoteTimestamp,
+                        localExportedAt = localTimestamp
+                    )
+                }
+                else -> RemoteSyncCheck.InSync
+            }
+        } catch (e: Exception) {
+            Log.e("MetadataManager", "checkForRemoteUpdates failed", e)
+            RemoteSyncCheck.CheckFailed(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Downloads and decrypts the metadata file. Used when remote is newer and the user
+     * wants to see the diff before syncing.
+     */
+    suspend fun downloadAndDecryptMetadata(fileId: Int): String? {
+        return try {
+            downloadMetadataFileBlocking(fileId)
+        } catch (e: Exception) {
+            Log.e("MetadataManager", "Failed to download/decrypt metadata for sync", e)
+            null
+        }
+    }
 }
 
 sealed interface StorageValidation {
@@ -386,4 +462,25 @@ sealed interface CheckStoredMetadataResult {
     data object Found : CheckStoredMetadataResult
     data class NotFound(val messageId: Long?, val reason: String) : CheckStoredMetadataResult
     data object SkippedNotConfigured : CheckStoredMetadataResult
+}
+
+sealed interface RemoteSyncCheck {
+    /** Remote metadata is newer than local — user should be prompted to sync */
+    data class RemoteNewer(
+        val remoteExportedAt: Long,
+        val localExportedAt: Long?,
+        val metadataFileId: Int
+    ) : RemoteSyncCheck
+
+    /** Local is newer than remote — metadata push may have failed */
+    data class LocalNewer(
+        val remoteExportedAt: Long,
+        val localExportedAt: Long
+    ) : RemoteSyncCheck
+
+    /** Timestamps match — everything is in sync */
+    data object InSync : RemoteSyncCheck
+
+    /** Could not perform the check (non-fatal) */
+    data class CheckFailed(val reason: String) : RemoteSyncCheck
 }

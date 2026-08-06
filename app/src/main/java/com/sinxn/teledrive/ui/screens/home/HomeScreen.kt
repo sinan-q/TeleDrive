@@ -24,6 +24,7 @@ import com.sinxn.teledrive.ui.screens.home.components.ErrorStateView
 import com.sinxn.teledrive.ui.screens.home.components.FileListView
 import com.sinxn.teledrive.ui.screens.home.components.FileGridView
 import com.sinxn.teledrive.ui.screens.home.components.RenameDialog
+import com.sinxn.teledrive.ui.screens.home.components.RemoteSyncDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -62,6 +63,7 @@ fun HomeScreen(
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val activeDownloads by viewModel.activeDownloads.collectAsState()
     val transferStatusText by viewModel.transferStatusText.collectAsState()
+    val remoteSyncAvailable by viewModel.remoteSyncAvailable.collectAsState()
 
     // Intercept physical/gesture back button if we are inside a folder
     BackHandler(enabled = breadcrumbs.isNotEmpty()) {
@@ -262,6 +264,14 @@ fun HomeScreen(
             onRename = { newName ->
                 viewModel.renameFile(file.id, newName)
             }
+        )
+    }
+
+    remoteSyncAvailable?.let { syncInfo ->
+        RemoteSyncDialog(
+            syncInfo = syncInfo,
+            onConfirm = { viewModel.confirmRemoteSync() },
+            onDismiss = { viewModel.dismissRemoteSync() }
         )
     }
 }

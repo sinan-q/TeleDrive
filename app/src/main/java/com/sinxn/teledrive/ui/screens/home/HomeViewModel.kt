@@ -4,12 +4,15 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sinxn.teledrive.data.backup.BackupManager
+import com.sinxn.teledrive.data.backup.SyncDiff
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.CheckStoredMetadataResult
 import com.sinxn.teledrive.data.repository.DownloadEvent
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.repository.MetadataManager
+import com.sinxn.teledrive.data.repository.RemoteSyncCheck
 import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
@@ -36,6 +39,13 @@ sealed class HomeUiState {
     data class Error(val message: String) : HomeUiState()
 }
 
+data class RemoteSyncInfo(
+    val remoteExportedAt: Long,
+    val localExportedAt: Long?,
+    val diff: SyncDiff,
+    val decryptedJson: String
+)
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val fileRepository: FileRepository,
@@ -43,6 +53,7 @@ class HomeViewModel @Inject constructor(
     private val securePrefs: SecurePrefs,
     private val authManager: AuthManager,
     private val metadataManager: MetadataManager,
+    private val backupManager: BackupManager,
     private val application: Application
 ) : ViewModel() {
 
@@ -64,6 +75,10 @@ class HomeViewModel @Inject constructor(
     private val currentFolder = MutableStateFlow<FileEntity?>(null)
     private var observeJob: Job? = null
     private var userId: String = ""
+
+    /** Remote sync detection state */
+    private val _remoteSyncAvailable = MutableStateFlow<RemoteSyncInfo?>(null)
+    val remoteSyncAvailable: StateFlow<RemoteSyncInfo?> = _remoteSyncAvailable.asStateFlow()
 
     /** The file currently targeted for replacement (drives the replacement file picker). */
     private val _fileToReplace = MutableStateFlow<FileEntity?>(null)
@@ -226,6 +241,9 @@ class HomeViewModel @Inject constructor(
                     observeCurrentFolder()
                 }
 
+                // Check for remote metadata updates (non-blocking)
+                checkRemoteSyncStatus()
+
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Failed to sync Home screen data", e)
                 if (cachedUserId == null) {
@@ -381,5 +399,58 @@ class HomeViewModel @Inject constructor(
                 _snackbarEvents.emit("Failed to move file")
             }
         }
+    }
+
+    private fun checkRemoteSyncStatus() {
+        viewModelScope.launch {
+            try {
+                when (val syncCheck = metadataManager.checkForRemoteUpdates()) {
+                    is RemoteSyncCheck.RemoteNewer -> {
+                        val decryptedJson = metadataManager.downloadAndDecryptMetadata(syncCheck.metadataFileId)
+                        if (decryptedJson != null) {
+                            val diff = backupManager.computeDiff(decryptedJson)
+                            if (diff.hasChanges) {
+                                _remoteSyncAvailable.value = RemoteSyncInfo(
+                                    remoteExportedAt = syncCheck.remoteExportedAt,
+                                    localExportedAt = syncCheck.localExportedAt,
+                                    diff = diff,
+                                    decryptedJson = decryptedJson
+                                )
+                            } else {
+                                securePrefs.setLastSyncedExportedAt(syncCheck.remoteExportedAt)
+                            }
+                        }
+                    }
+                    is RemoteSyncCheck.LocalNewer -> {
+                        _snackbarEvents.emit("Local changes haven't been synced to Telegram yet.")
+                    }
+                    is RemoteSyncCheck.InSync, is RemoteSyncCheck.CheckFailed -> {
+                        // In sync or skipped/failed
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error checking remote sync status", e)
+            }
+        }
+    }
+
+    fun confirmRemoteSync() {
+        val syncInfo = _remoteSyncAvailable.value ?: return
+        _remoteSyncAvailable.value = null
+        viewModelScope.launch {
+            try {
+                metadataManager.importMetadata(syncInfo.decryptedJson)
+                securePrefs.setLastSyncedExportedAt(syncInfo.remoteExportedAt)
+                _snackbarEvents.emit("Vault synced with remote updates.")
+                loadFiles()
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Failed to apply remote sync", e)
+                _snackbarEvents.emit("Sync failed: ${e.message}")
+            }
+        }
+    }
+
+    fun dismissRemoteSync() {
+        _remoteSyncAvailable.value = null
     }
 }
