@@ -65,6 +65,10 @@ interface FileDao {
     @Query("DELETE FROM files WHERE id = :id")
     suspend fun hardDeleteFile(id: String)
 
+    /** Clean up any stale saf_enc_ artifact files from database */
+    @Query("DELETE FROM files WHERE name LIKE 'saf_enc_%' OR id LIKE 'saf_enc_%'")
+    suspend fun cleanupStaleSafArtifacts()
+
     /** Update the transfer progress of an active file (0.0 to 1.0) */
     @Query("UPDATE files SET upload_progress = :progress WHERE file_id = :fileId")
     suspend fun updateTransferProgress(fileId: String, progress: Float)

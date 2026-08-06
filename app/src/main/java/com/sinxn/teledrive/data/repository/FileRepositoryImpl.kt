@@ -58,6 +58,15 @@ class FileRepositoryImpl @Inject constructor(
     private val pendingUploadParents =
         java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue<String>>()
 
+    /** Maps a pending SAF upload's encrypted filename to the initial placeholder documentId. */
+    private val pendingUploadSafIds =
+        java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue<String>>()
+
+    /** Dynamic alias map resolving temporary SAF documentIds to permanent FileEntity IDs */
+    private val safIdAliases = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    override fun resolveSafAlias(safId: String): String? = safIdAliases[safId]
+
     private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     override val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
@@ -81,6 +90,15 @@ class FileRepositoryImpl @Inject constructor(
     )
 
     init {
+        scope.launch {
+            // Clean up any stale saf_enc_ artifact files from prior buggy sessions
+            try {
+                fileDao.cleanupStaleSafArtifacts()
+            } catch (e: Exception) {
+                Log.w("FileRepositoryImpl", "Could not clean stale SAF artifacts", e)
+            }
+        }
+
         scope.launch {
             telegramClient.updates.collect { update ->
                 when (update) {
@@ -160,9 +178,17 @@ class FileRepositoryImpl @Inject constructor(
 
                                     // Re-attach parent folder mapping using the ORIGINAL name
                                     val parentId = dequeuePendingParent(entity.localName())
+                                    val safId = dequeuePendingSafId(entity.localName())
+
                                     val entityToInsert = if (parentId != null) {
                                         cleanEntity.copy(parentId = parentId)
                                     } else cleanEntity
+
+                                    // If this upload originated from a SAF createDocument placeholder, delete the placeholder and alias it
+                                    if (safId != null) {
+                                        fileDao.hardDeleteFile(safId)
+                                        safIdAliases[safId] = entityToInsert.id
+                                    }
 
                                     entityToInsert.fileId?.toIntOrNull()?.let { fileIdInt ->
                                         pendingDownloadEntityIds[fileIdInt] = entityToInsert.id
@@ -193,6 +219,7 @@ class FileRepositoryImpl @Inject constructor(
                         val oldEntity = fileDao.getFileById(oldId)
                         val uploadKey = update.message.toFileEntity(activeUserId)?.localName()
                         val parentId = oldEntity?.parentId ?: uploadKey?.let(::dequeuePendingParent)
+                        val safId = uploadKey?.let(::dequeuePendingSafId)
                         
                         // Create the final entity with the permanent ID
                         val newEntity = update.message.toFileEntity(activeUserId, parentId)
@@ -214,6 +241,17 @@ class FileRepositoryImpl @Inject constructor(
                                     )
                                 }
                                 else -> newEntity
+                            }
+
+                            if (safId != null) {
+                                fileDao.hardDeleteFile(safId)
+                                safIdAliases[safId] = cleanEntity.id
+                            }
+                            // Update existing aliases targeting old temporary message ID
+                            safIdAliases.entries.forEach { entry ->
+                                if (entry.value == oldId) {
+                                    safIdAliases[entry.key] = cleanEntity.id
+                                }
                             }
 
                             // Delete the temporary record and insert the final one
@@ -873,6 +911,153 @@ class FileRepositoryImpl @Inject constructor(
             pendingUploadMeta.remove(fileName, queue)
         }
         return value
+    }
+
+    private fun enqueuePendingSafId(fileName: String, safId: String) {
+        pendingUploadSafIds
+            .getOrPut(fileName) { java.util.concurrent.ConcurrentLinkedQueue() }
+            .add(safId)
+    }
+
+    private fun dequeuePendingSafId(fileName: String): String? {
+        val queue = pendingUploadSafIds[fileName] ?: return null
+        val value = queue.poll()
+        if (queue.isEmpty()) {
+            pendingUploadSafIds.remove(fileName, queue)
+        }
+        return value
+    }
+
+    override suspend fun uploadSafFile(
+        tempFile: java.io.File,
+        displayName: String,
+        mimeType: String?,
+        parentId: String?,
+        userId: String,
+        placeholderId: String?
+    ): String {
+        return withContext(Dispatchers.IO) {
+            val targetChatId = resolveTargetChatId(userId)
+            val cleanName = displayName.trim().takeIf { it.isNotBlank() } ?: "Untitled"
+            val encFileName = if (cleanName.endsWith(".enc")) cleanName else "$cleanName.enc"
+
+            val tempDir = java.io.File(context.cacheDir, "saf_upload_${java.util.UUID.randomUUID()}").apply { mkdirs() }
+            val encFile = java.io.File(tempDir, encFileName)
+
+            try {
+                tempFile.inputStream().use { stream ->
+                    fileCryptor.encryptStream(stream, encFile)
+                }
+
+                if (encFile.length() <= 0L) {
+                    encFile.delete()
+                    tempDir.delete()
+                    return@withContext cleanName
+                }
+
+                Log.d("FileRepositoryImpl", "SAF Encrypted $cleanName -> ${encFile.name} (${encFile.length()} bytes)")
+
+                if (parentId != null) {
+                    enqueuePendingParent(encFile.name, parentId)
+                }
+                enqueueUploadMeta(encFile.name, UploadMeta(cleanName, mimeType))
+                if (placeholderId != null) {
+                    enqueuePendingSafId(encFile.name, placeholderId)
+                }
+
+                val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
+                val inputMessageContent = TdApi.InputMessageDocument(
+                    inputFile,
+                    null,
+                    true,
+                    null
+                )
+
+                val sendMessage = TdApi.SendMessage(
+                    targetChatId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    inputMessageContent
+                )
+
+                telegramClient.sendAsync(sendMessage) { result ->
+                    if (result is TdApi.Error) {
+                        dequeuePendingParent(encFile.name)
+                        dequeueUploadMeta(encFile.name)
+                        dequeuePendingSafId(encFile.name)
+                        encFile.delete()
+                        tempDir.delete()
+                        Log.e("FileRepositoryImpl", "Failed to queue SAF upload: ${result.message}")
+                    } else {
+                        encFile.deleteOnExit()
+                        tempDir.deleteOnExit()
+                    }
+                }
+                cleanName
+            } catch (e: Exception) {
+                Log.e("FileRepositoryImpl", "Error initiating SAF upload", e)
+                throw e
+            } finally {
+                tempFile.delete()
+            }
+        }
+    }
+
+    override suspend fun replaceSafFile(existingFile: FileEntity, tempFile: java.io.File) {
+        withContext(Dispatchers.IO) {
+            try {
+                val targetChatId = resolveTargetChatId(existingFile.userId)
+                val messageId = existingFile.messageId?.toLongOrNull()
+                    ?: error("Cannot replace file without a Telegram message ID")
+
+                val tempDir = java.io.File(context.cacheDir, "replace_${java.util.UUID.randomUUID()}").apply { mkdirs() }
+                val encFileName = "${existingFile.name}.enc"
+                val encFile = java.io.File(tempDir, encFileName)
+
+                try {
+                    tempFile.inputStream().use { stream ->
+                        fileCryptor.encryptStream(stream, encFile)
+                    }
+
+                    val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
+                    val inputContent = TdApi.InputMessageDocument(inputFile, null, true, null)
+
+                    val result = telegramClient.send(
+                        TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
+                    )
+
+                    if (result is TdApi.Message) {
+                        val doc = (result.content as? TdApi.MessageDocument)?.document
+                        if (doc != null) {
+                            fileDao.updateFileContent(
+                                id = existingFile.id,
+                                messageId = result.id.toString(),
+                                fileId = doc.document.id.toString(),
+                                size = doc.document.expectedSize,
+                                mimeType = existingFile.mimeType,
+                                chatId = result.chatId,
+                                updatedAt = System.currentTimeMillis(),
+                                isMultipart = false,
+                                partIndex = null,
+                                totalParts = null,
+                                originalFileName = null
+                            )
+                        }
+                        saveMetadataRemote(existingFile.userId)
+                        Log.d("FileRepositoryImpl", "Replaced SAF file '${existingFile.name}' via EditMessageMedia (msg $messageId)")
+                    } else if (result is TdApi.Error) {
+                        Log.e("FileRepositoryImpl", "EditMessageMedia failed for SAF file: ${result.message}")
+                    }
+                } finally {
+                    encFile.delete()
+                    tempDir.delete()
+                }
+            } finally {
+                tempFile.delete()
+            }
+        }
     }
 
     private suspend fun resolveTargetChatId(userId: String): Long {

@@ -84,11 +84,31 @@ interface FileRepository {
     suspend fun initializeVault(userId: String)
 
     /**
-     * Replaces the contents of an existing file with new content from the device.
-     * Uses EditMessageMedia to swap the document in-place on Telegram.
-     * Preserves name, parent folder, and creation timestamp.
+     * Replaces an existing encrypted file with the contents from a new URI.
      */
     suspend fun replaceFile(existingFile: FileEntity, newContentUri: Uri)
+
+    /**
+     * Uploads a file written by an external app via Storage Access Framework (SAF).
+     */
+    suspend fun uploadSafFile(
+        tempFile: java.io.File,
+        displayName: String,
+        mimeType: String?,
+        parentId: String?,
+        userId: String,
+        placeholderId: String? = null
+    ): String
+
+    /**
+     * Replaces an existing encrypted file with the contents from a SAF written file.
+     */
+    suspend fun replaceSafFile(existingFile: FileEntity, tempFile: java.io.File)
+
+    /**
+     * Resolves a SAF temporary placeholder documentId to its permanent FileEntity ID.
+     */
+    fun resolveSafAlias(safId: String): String?
 
     /**
      * Observable flow of the current sync status.
