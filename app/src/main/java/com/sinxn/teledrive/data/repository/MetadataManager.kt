@@ -37,10 +37,11 @@ class MetadataManager @Inject constructor(
      * @return The message ID of the newly created metadata message.
      */
     suspend fun initializeMetadataMessage(chatId: Long): Long {
-        val jsonPayload = backupManager.generateBackupJson()
+        val timestamp = System.currentTimeMillis()
+        val jsonPayload = backupManager.generateBackupJson(timestamp)
         val encryptedBytes = fileCryptor.encryptBytes(jsonPayload.toByteArray(Charsets.UTF_8))
         
-        val tempFile = File(context.cacheDir, "metadata_init.enc")
+        val tempFile = File(context.cacheDir, "metadata_init_${timestamp}.enc")
         tempFile.writeBytes(encryptedBytes)
         
         val inputFile = TdApi.InputFileLocal(tempFile.absolutePath)
@@ -67,10 +68,11 @@ class MetadataManager @Inject constructor(
      * Uses EditMessageMedia to avoid spamming the chat history.
      */
     suspend fun updateMetadataMessage(chatId: Long, messageId: Long) {
-        val jsonPayload = backupManager.generateBackupJson()
+        val timestamp = System.currentTimeMillis()
+        val jsonPayload = backupManager.generateBackupJson(timestamp)
         val encryptedBytes = fileCryptor.encryptBytes(jsonPayload.toByteArray(Charsets.UTF_8))
         
-        val tempFile = File(context.cacheDir, "metadata_update_${System.currentTimeMillis()}.enc")
+        val tempFile = File(context.cacheDir, "metadata_update_${timestamp}.enc")
         tempFile.writeBytes(encryptedBytes)
         
         val inputFile = TdApi.InputFileLocal(tempFile.absolutePath)
@@ -94,9 +96,10 @@ class MetadataManager @Inject constructor(
                 delay((waitSeconds * 1000L) + 500L)
 
                 // Re-generate with latest DB state (may have changed during wait)
-                val retryJson = backupManager.generateBackupJson()
+                val retryTimestamp = System.currentTimeMillis()
+                val retryJson = backupManager.generateBackupJson(retryTimestamp)
                 val retryEncrypted = fileCryptor.encryptBytes(retryJson.toByteArray(Charsets.UTF_8))
-                val retryFile = File(context.cacheDir, "metadata_retry_${System.currentTimeMillis()}.enc")
+                val retryFile = File(context.cacheDir, "metadata_retry_${retryTimestamp}.enc")
                 retryFile.writeBytes(retryEncrypted)
 
                 val retryContent = TdApi.InputMessageDocument(

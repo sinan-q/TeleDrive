@@ -28,11 +28,11 @@ class BackupManager @Inject constructor(
         ignoreUnknownKeys = true
     }
 
-    suspend fun generateBackupJson(): String {
+    suspend fun generateBackupJson(exportedAt: Long = System.currentTimeMillis()): String {
         val backup = BackupDocument(
             magicHeader = "TELEDRIVE_VAULT_V1",
             schemaVersion = 1,
-            exportedAt = System.currentTimeMillis(),
+            exportedAt = exportedAt,
             users = userDao.getAllUsers().map(UserEntity::toBackup),
             files = fileDao.getAllFiles().map(FileEntity::toBackup),
             preferences = BackupPreferences(
