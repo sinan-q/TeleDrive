@@ -34,6 +34,10 @@ android {
         // Telegram API credentials (from local.properties)
         buildConfigField("int", "TELEGRAM_API_ID", localProperties.getProperty("TELEGRAM_API_ID", "0"))
         buildConfigField("String", "TELEGRAM_API_HASH", "\"${localProperties.getProperty("TELEGRAM_API_HASH", "")}\"")
+
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
