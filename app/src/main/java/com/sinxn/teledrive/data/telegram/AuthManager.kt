@@ -46,6 +46,7 @@ class AuthManager @Inject constructor(
     // Scope for collecting SharedFlow events from TelegramClient
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val hasStarted = AtomicBoolean(false)
+    val isStarted: Boolean get() = hasStarted.get()
 
     /**
      * Starts the TDLib client and begins listening for auth state updates.

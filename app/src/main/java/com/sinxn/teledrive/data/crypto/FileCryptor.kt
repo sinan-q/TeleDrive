@@ -141,26 +141,40 @@ class FileCryptor @Inject constructor(
      * @return the output file (for chaining)
      * @throws javax.crypto.AEADBadTagException if the password is wrong or data was tampered with
      */
+    /**
+     * Decrypts [inputFile] (a .enc file) and writes the plaintext to [outputFile].
+     *
+     * Reads the 28-byte header (salt + IV) from the encrypted file, derives the AES key
+     * using the raw master password, and streams the decrypted content out.
+     *
+     * @return the output file (for chaining)
+     * @throws javax.crypto.AEADBadTagException if the password is wrong or data was tampered with
+     */
     fun decryptFile(inputFile: File, outputFile: File): File {
-        val password = encryptionManager.getSessionPassword()
-
         FileInputStream(inputFile).use { fis ->
-            PushbackInputStream(fis, CHUNKED_MAGIC.size).use { input ->
-                val prefix = ByteArray(CHUNKED_MAGIC.size)
-                input.readExactly(prefix)
-
-                FileOutputStream(outputFile).buffered().use { output ->
-                    if (prefix.contentEquals(CHUNKED_MAGIC)) {
-                        decryptChunkedStream(input, output, password)
-                    } else {
-                        input.unread(prefix)
-                        decryptLegacyStream(input, output, password)
-                    }
-                }
+            FileOutputStream(outputFile).buffered().use { output ->
+                decryptStreamToOutput(fis, output)
             }
         }
 
         return outputFile
+    }
+
+    /**
+     * Decrypts an encrypted [InputStream] directly into an [OutputStream] without writing plaintext to disk.
+     */
+    fun decryptStreamToOutput(inputStream: InputStream, outputStream: java.io.OutputStream) {
+        val password = encryptionManager.getSessionPassword()
+        PushbackInputStream(inputStream, CHUNKED_MAGIC.size).use { input ->
+            val prefix = ByteArray(CHUNKED_MAGIC.size)
+            input.readExactly(prefix)
+            if (prefix.contentEquals(CHUNKED_MAGIC)) {
+                decryptChunkedStream(input, outputStream, password)
+            } else {
+                input.unread(prefix)
+                decryptLegacyStream(input, outputStream, password)
+            }
+        }
     }
 
     /**

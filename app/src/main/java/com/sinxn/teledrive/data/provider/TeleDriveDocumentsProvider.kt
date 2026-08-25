@@ -11,12 +11,16 @@ import android.provider.DocumentsContract
 import android.provider.DocumentsProvider
 import android.util.Log
 import android.webkit.MimeTypeMap
+import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
+import com.sinxn.teledrive.data.crypto.EncryptionManager
 import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.repository.MetadataManager
+import com.sinxn.teledrive.data.telegram.AuthManager
+import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.di.DocumentsProviderEntryPoint
 import dagger.hilt.android.EntryPointAccessors
@@ -26,8 +30,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.drinkless.tdlib.TdApi
 import java.io.File
 import java.io.FileInputStream
@@ -93,6 +99,9 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
     private val fileCryptor: FileCryptor by lazy { entryPoint.fileCryptor() }
     private val metadataManager: MetadataManager by lazy { entryPoint.metadataManager() }
     private val fileRepository: FileRepository by lazy { entryPoint.fileRepository() }
+    private val authManager: AuthManager by lazy { entryPoint.authManager() }
+    private val encryptionManager: EncryptionManager by lazy { entryPoint.encryptionManager() }
+    private val biometricPasswordStore: BiometricPasswordStore by lazy { entryPoint.biometricPasswordStore() }
 
     private val providerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -102,6 +111,49 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
     override fun onCreate(): Boolean {
         Log.d(TAG, "TeleDriveDocumentsProvider created")
         return true
+    }
+
+    /**
+     * Ensures that TDLib is started and authenticated (ready), and that the encryption vault
+     * is auto-unlocked if credentials are available.
+     *
+     * This is essential when the provider is cold-started by external apps via SAF without MainActivity.
+     */
+    private suspend fun ensureTdLibAndVaultReady(): Boolean {
+        // 1. Attempt vault auto-unlock if configured and not yet unlocked
+        if (encryptionManager.isPasswordSetUp() && !encryptionManager.isUnlocked && !securePrefs.isAuthOnLaunchEnabled()) {
+            val storedSecret = securePrefs.getAutoUnlockSecret()
+            if (storedSecret != null) {
+                try {
+                    val decryptedPassword = biometricPasswordStore.decryptForAutoUnlock(storedSecret)
+                    if (decryptedPassword != null) {
+                        encryptionManager.unlockWithPassword(decryptedPassword)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Vault auto-unlock failed in DocumentsProvider", e)
+                }
+            }
+        }
+
+        // 2. If TDLib is not started yet, start it
+        if (!authManager.isStarted) {
+            authManager.startClient()
+        }
+
+        // 3. If already Ready, return immediately
+        if (authManager.authState.value is AuthState.Ready) {
+            return true
+        }
+
+        // 4. Wait for AuthState.Ready with timeout (15 seconds)
+        return try {
+            withTimeoutOrNull(15_000L) {
+                authManager.authState.first { it is AuthState.Ready }
+            } != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Timed out or error waiting for TDLib to be Ready", e)
+            false
+        }
     }
 
     // ── Roots ───────────────────────────────────────────────────────
@@ -114,7 +166,8 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
 
         val rootFlags = DocumentsContract.Root.FLAG_SUPPORTS_SEARCH or
                 DocumentsContract.Root.FLAG_SUPPORTS_CREATE or
-                DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD
+                DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD or
+                DocumentsContract.Root.FLAG_SUPPORTS_RECENTS
 
         result.newRow().apply {
             add(DocumentsContract.Root.COLUMN_ROOT_ID, ROOT_ID)
@@ -187,11 +240,12 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
 
     override fun isChildDocument(parentDocumentId: String?, documentId: String?): Boolean {
         if (parentDocumentId == null || documentId == null) return false
-        if (parentDocumentId == documentId) return true
 
         val resolvedParent = fileRepository.resolveSafAlias(parentDocumentId) ?: parentDocumentId
         val resolvedDoc = fileRepository.resolveSafAlias(documentId) ?: documentId
-        if (resolvedParent == resolvedDoc) return true
+        
+        // A document cannot be its own child unless both refer to the virtual root
+        if (resolvedParent == resolvedDoc && resolvedParent != ROOT_DOC_ID) return false
 
         val expectedParentId = if (resolvedParent == ROOT_DOC_ID) null else resolvedParent
         var currentDocId: String? = resolvedDoc
@@ -285,6 +339,61 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         return documentId
     }
 
+    // ── Document Moving ─────────────────────────────────────────────
+
+    override fun moveDocument(
+        sourceDocumentId: String?,
+        sourceParentDocumentId: String?,
+        targetParentDocumentId: String?
+    ): String? {
+        if (sourceDocumentId == null || targetParentDocumentId == null) return null
+
+        val resolvedSourceId = fileRepository.resolveSafAlias(sourceDocumentId) ?: sourceDocumentId
+        val resolvedTargetParentId = if (targetParentDocumentId == ROOT_DOC_ID) null
+            else (fileRepository.resolveSafAlias(targetParentDocumentId) ?: targetParentDocumentId)
+
+        runBlocking(Dispatchers.IO) {
+            fileRepository.moveFile(resolvedSourceId, resolvedTargetParentId)
+            notifyParentChanged(sourceParentDocumentId ?: ROOT_DOC_ID)
+            notifyParentChanged(targetParentDocumentId)
+        }
+        return resolvedSourceId
+    }
+
+    // ── Document Removal ────────────────────────────────────────────
+
+    override fun removeDocument(documentId: String?, parentDocumentId: String?) {
+        deleteDocument(documentId)
+    }
+
+    // ── Document Path Finding ────────────────────────────────────────
+
+    override fun findDocumentPath(
+        parentDocumentId: String?,
+        childDocumentId: String?
+    ): DocumentsContract.Path? {
+        if (childDocumentId == null) return null
+        val resolvedChildId = fileRepository.resolveSafAlias(childDocumentId) ?: childDocumentId
+        val resolvedParentId = parentDocumentId?.let { fileRepository.resolveSafAlias(it) ?: it }
+
+        val path = mutableListOf<String>()
+        var currentId: String? = resolvedChildId
+        val visited = mutableSetOf<String>()
+
+        while (currentId != null && visited.add(currentId)) {
+            path.add(0, currentId)
+            if (currentId == resolvedParentId || (resolvedParentId == null && currentId == ROOT_DOC_ID)) break
+            val entity = runBlocking(Dispatchers.IO) { fileDao.getFileById(currentId) } ?: break
+            currentId = entity.parentId ?: ROOT_DOC_ID
+        }
+
+        if (path.firstOrNull() != ROOT_DOC_ID) {
+            path.add(0, ROOT_DOC_ID)
+        }
+
+        return DocumentsContract.Path(ROOT_ID, path)
+    }
+
     // ── File streaming / reading / writing ───────────────────────────
 
     override fun openDocument(
@@ -322,6 +431,12 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
             return ParcelFileDescriptor.open(emptyTemp, ParcelFileDescriptor.MODE_READ_ONLY)
         }
 
+        // Ensure TDLib and Vault are ready before attempting to contact Telegram
+        val isReady = runBlocking(Dispatchers.IO) { ensureTdLibAndVaultReady() }
+        if (!isReady) {
+            throw IllegalStateException("TeleDrive is not logged in or TDLib initialization timed out")
+        }
+
         // Resolve the Telegram file ID. Re-fetch from TG if the local record is stale.
         val resolvedEntity = runBlocking(Dispatchers.IO) { resolveLatestFile(entity) }
         val fileIdInt = resolvedEntity.fileId?.toIntOrNull()
@@ -352,18 +467,13 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
             try {
                 ParcelFileDescriptor.AutoCloseOutputStream(writeEnd).use { outputStream ->
                     if (encryptedFile.name.endsWith(".enc")) {
-                        val tempDecrypted = File(
-                            context!!.cacheDir,
-                            "saf_dec_${System.currentTimeMillis()}_${entity.cleanExportName()}"
-                        )
-                        try {
-                            fileCryptor.decryptFile(encryptedFile, tempDecrypted)
-                            FileInputStream(tempDecrypted).use { it.copyTo(outputStream) }
-                        } finally {
-                            tempDecrypted.delete()
+                        FileInputStream(encryptedFile).use { fis ->
+                            fileCryptor.decryptStreamToOutput(fis, outputStream)
                         }
                     } else {
-                        FileInputStream(encryptedFile).use { it.copyTo(outputStream) }
+                        FileInputStream(encryptedFile).use { fis ->
+                            fis.copyTo(outputStream)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -390,6 +500,7 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         val isAppendOrReadWrite = (mode.contains("a") || mode == "rw") && !mode.contains("t")
         if (isAppendOrReadWrite && !entity.fileId.isNullOrBlank()) {
             try {
+                runBlocking(Dispatchers.IO) { ensureTdLibAndVaultReady() }
                 val resolved = runBlocking(Dispatchers.IO) { resolveLatestFile(entity) }
                 resolved.fileId?.toIntOrNull()?.let { fileIdInt ->
                     val tdFile = downloadTelegramFile(fileIdInt, resolved, null)
@@ -427,8 +538,9 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
 
     private suspend fun uploadWrittenSafFile(documentId: String, tempFile: File) {
         try {
-            if (!tempFile.exists() || tempFile.length() == 0L) {
-                Log.w(TAG, "Written temp file for $documentId is empty or does not exist")
+            ensureTdLibAndVaultReady()
+            if (!tempFile.exists()) {
+                Log.w(TAG, "Written temp file for $documentId does not exist")
                 tempFile.delete()
                 return
             }
@@ -505,11 +617,13 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         val flags = if (isFolder) {
             DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE or
                     DocumentsContract.Document.FLAG_SUPPORTS_DELETE or
-                    DocumentsContract.Document.FLAG_SUPPORTS_RENAME
+                    DocumentsContract.Document.FLAG_SUPPORTS_RENAME or
+                    DocumentsContract.Document.FLAG_SUPPORTS_MOVE
         } else {
             DocumentsContract.Document.FLAG_SUPPORTS_WRITE or
                     DocumentsContract.Document.FLAG_SUPPORTS_DELETE or
-                    DocumentsContract.Document.FLAG_SUPPORTS_RENAME
+                    DocumentsContract.Document.FLAG_SUPPORTS_RENAME or
+                    DocumentsContract.Document.FLAG_SUPPORTS_MOVE
         }
 
         cursor.newRow().apply {
@@ -547,6 +661,7 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
     private fun triggerRemoteMetadataSync(userId: String) {
         providerScope.launch(Dispatchers.IO) {
             try {
+                ensureTdLibAndVaultReady()
                 val chatId = resolveTargetChatId(userId)
                 val messageId = securePrefs.getMetadataMessageId()
                 if (messageId != null && messageId != 0L) {
@@ -622,6 +737,11 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
             val downloadResult = telegramClient.send(
                 TdApi.DownloadFile(fileId, 32, 0, 0, true)
             )
+
+            if (downloadResult is TdApi.Error) {
+                Log.e(TAG, "TDLib downloadFile failed for $fileId: ${downloadResult.message}")
+                return@runBlocking null
+            }
 
             if (downloadResult is TdApi.File && downloadResult.local.isDownloadingCompleted) {
                 return@runBlocking downloadResult

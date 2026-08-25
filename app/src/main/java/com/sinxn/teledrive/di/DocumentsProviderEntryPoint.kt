@@ -1,10 +1,13 @@
 package com.sinxn.teledrive.di
 
+import com.sinxn.teledrive.data.crypto.BiometricPasswordStore
+import com.sinxn.teledrive.data.crypto.EncryptionManager
 import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.repository.FileRepository
 import com.sinxn.teledrive.data.repository.MetadataManager
+import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -26,4 +29,7 @@ interface DocumentsProviderEntryPoint {
     fun fileCryptor(): FileCryptor
     fun metadataManager(): MetadataManager
     fun fileRepository(): FileRepository
+    fun authManager(): AuthManager
+    fun encryptionManager(): EncryptionManager
+    fun biometricPasswordStore(): BiometricPasswordStore
 }
