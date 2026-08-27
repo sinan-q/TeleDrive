@@ -269,6 +269,30 @@ class FileRepositoryImpl @Inject constructor(
                             saveMetadataRemote(activeUserId)
                         }
                     }
+                    is TdApi.UpdateMessageSendFailed -> {
+                        val activeUserId = securePrefs.getUserId() ?: return@collect
+                        val oldId = "msg_${update.oldMessageId}"
+                        val oldEntity = fileDao.getFileById(oldId)
+
+                        val uploadKey = update.message?.toFileEntity(activeUserId)?.localName()
+                        if (uploadKey != null) {
+                            dequeuePendingParent(uploadKey)
+                            dequeueUploadMeta(uploadKey)
+                            dequeuePendingSafId(uploadKey)
+                        }
+
+                        // Delete the temporary record from Room
+                        fileDao.hardDeleteFile(oldId)
+
+                        val displayName = oldEntity?.name
+                            ?: update.message?.toFileEntity(activeUserId)?.name
+                            ?: "File"
+                        val errorMsg = update.error?.message?.ifBlank { null }
+                            ?: "Upload failed (code: ${update.error?.code})"
+
+                        Log.e("FileRepositoryImpl", "Upload failed for '$displayName' (oldMsgId=${update.oldMessageId}): $errorMsg")
+                        _downloadEvents.tryEmit(DownloadEvent.Failure(oldId, displayName, errorMsg))
+                    }
                 }
             }
         }
@@ -1058,21 +1082,22 @@ class FileRepositoryImpl @Inject constructor(
                     inputMessageContent
                 )
 
-                telegramClient.sendAsync(sendMessage) { result ->
-                    if (result is TdApi.Error) {
-                        dequeuePendingParent(encFile.name)
-                        dequeueUploadMeta(encFile.name)
-                        dequeuePendingSafId(encFile.name)
-                        encFile.delete()
-                        tempDir.delete()
-                        Log.e("FileRepositoryImpl", "Failed to queue SAF upload: ${result.message}")
-                        _downloadEvents.tryEmit(
-                            DownloadEvent.Failure(null, cleanName, result.message ?: "Failed to queue upload")
-                        )
-                    } else {
-                        encFile.deleteOnExit()
-                        tempDir.deleteOnExit()
+                try {
+                    val sendResult = telegramClient.send(sendMessage)
+                    if (sendResult !is TdApi.Message) {
+                        error("Unexpected response from TDLib when sending SAF upload: $sendResult")
                     }
+                } catch (e: Exception) {
+                    dequeuePendingParent(encFile.name)
+                    dequeueUploadMeta(encFile.name)
+                    dequeuePendingSafId(encFile.name)
+                    encFile.delete()
+                    tempDir.delete()
+                    Log.e("FileRepositoryImpl", "Failed to queue SAF upload: ${e.message}", e)
+                    _downloadEvents.tryEmit(
+                        DownloadEvent.Failure(placeholderId, cleanName, e.message ?: "Failed to queue upload")
+                    )
+                    throw e
                 }
                 cleanName
             } catch (e: Exception) {
@@ -1297,20 +1322,21 @@ class FileRepositoryImpl @Inject constructor(
             inputMessageContent
         )
 
-        telegramClient.sendAsync(sendMessage) { result ->
-            if (result is TdApi.Error) {
-                dequeuePendingParent(encFile.name)
-                dequeueUploadMeta(encFile.name)
-                encFile.delete()
-                tempDir.delete()
-                Log.e("FileRepositoryImpl", "Failed to queue upload part: ${result.message}")
-                _downloadEvents.tryEmit(
-                    DownloadEvent.Failure(null, storedDisplayName, result.message ?: "Failed to queue upload")
-                )
-            } else {
-                encFile.deleteOnExit()
-                tempDir.deleteOnExit()
+        try {
+            val sendResult = telegramClient.send(sendMessage)
+            if (sendResult !is TdApi.Message) {
+                error("Unexpected response from TDLib when sending encrypted container: $sendResult")
             }
+        } catch (e: Exception) {
+            dequeuePendingParent(encFile.name)
+            dequeueUploadMeta(encFile.name)
+            encFile.delete()
+            tempDir.delete()
+            Log.e("FileRepositoryImpl", "Failed to queue upload container: ${e.message}", e)
+            _downloadEvents.tryEmit(
+                DownloadEvent.Failure(null, storedDisplayName, e.message ?: "Failed to queue upload")
+            )
+            throw e
         }
         return bytesRead
     }
