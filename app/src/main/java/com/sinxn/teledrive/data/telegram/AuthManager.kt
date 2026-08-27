@@ -160,6 +160,12 @@ class AuthManager @Inject constructor(
             is TdApi.AuthorizationStateClosing -> {
                 // Transitional state, no action needed
             }
+            is TdApi.AuthorizationStateWaitRegistration -> {
+                _authState.value = AuthState.Error(
+                    "This phone number is not registered with Telegram. " +
+                    "Please create a Telegram account first, then try again."
+                )
+            }
             else -> {
                 Log.w(TAG, "Unhandled auth state: ${state::class.simpleName}")
             }
@@ -216,7 +222,7 @@ class AuthManager @Inject constructor(
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> TdApi.NetworkTypeMobile()
             else -> TdApi.NetworkTypeOther()
         }
-        if (telegramClient.isActive) {
+        if (telegramClient.isActive && _authState.value is AuthState.Ready) {
             telegramClient.sendAsync(TdApi.SetNetworkType(tdNetworkType))
         }
     }
@@ -280,20 +286,25 @@ class AuthManager @Inject constructor(
      * Send the 2FA password to TDLib.
      */
     fun sendPassword(password: String) {
+        // Capture current WaitPassword state before transitioning to Loading,
+        // so we can restore hint/email fields on error.
+        val prevState = _authState.value
+        val hint = if (prevState is AuthState.WaitPassword) prevState.passwordHint else ""
+        val hasEmail = if (prevState is AuthState.WaitPassword) prevState.hasRecoveryEmail else false
+
         _authState.value = AuthState.Loading
         telegramClient.sendAsync(
             TdApi.CheckAuthenticationPassword(password)
         ) { result ->
             if (result is TdApi.Error) {
                 Log.e(TAG, "CheckAuthenticationPassword failed: ${result.message}")
-                // Restore WaitPassword state so the user can try again
-                val prevState = authState.value
-                val hint = if (prevState is AuthState.WaitPassword) prevState.passwordHint else ""
-                val hasEmail = if (prevState is AuthState.WaitPassword) prevState.hasRecoveryEmail else false
-                
-                // Set error temporarily, then revert to input state so UI shows error and input
-                _authState.value = AuthState.Error(result.message)
-                _authState.value = AuthState.WaitPassword(hint, hasEmail)
+                // Single emission with inline error — avoids the StateFlow conflation
+                // problem of emitting Error then WaitPassword on consecutive lines.
+                _authState.value = AuthState.WaitPassword(
+                    passwordHint = hint,
+                    hasRecoveryEmail = hasEmail,
+                    errorMessage = result.message
+                )
             }
         }
     }

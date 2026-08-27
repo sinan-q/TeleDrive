@@ -18,7 +18,8 @@ sealed class AuthState {
     /** TDLib is waiting for the 2FA password. */
     data class WaitPassword(
         val passwordHint: String = "",
-        val hasRecoveryEmail: Boolean = false
+        val hasRecoveryEmail: Boolean = false,
+        val errorMessage: String? = null
     ) : AuthState()
 
     /** TDLib is waiting for the password recovery code sent to the email. */

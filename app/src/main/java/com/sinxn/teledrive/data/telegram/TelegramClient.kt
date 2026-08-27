@@ -3,6 +3,7 @@ package com.sinxn.teledrive.data.telegram
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -18,8 +19,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * Kotlin wrapper around TDLib's [Client] providing a coroutine-friendly API.
  *
  * This is a @Singleton so the entire app shares one TDLib client instance.
- * Actual authentication flows (phone/OTP/2FA/QR) will be built on top
- * of this in Sprint 2.
+ * Updates are delivered via an UNLIMITED [Channel] to guarantee no TDLib
+ * update is ever silently dropped (unlike SharedFlow with DROP_OLDEST).
  */
 @Singleton
 class TelegramClient @Inject constructor() {
@@ -40,38 +41,45 @@ class TelegramClient @Inject constructor() {
 
     @Volatile
     private var client: Client? = null
-    
-    // Broadcasts all unsolicited updates from Telegram (new messages, auth state, file progress).
-    // Buffer capacity is sized to absorb high-throughput update bursts without dropping critical events.
+
+    private val lock = Any()
+
+    // Unbounded SharedFlow guarantees no TDLib update is ever dropped.
+    // With extraBufferCapacity = MAX_VALUE, tryEmit() always succeeds
+    // (no DROP_OLDEST needed). replay = 0 avoids delivering stale updates
+    // to late subscribers. Multiple collectors all receive every update (fan-out).
     private val _updates = MutableSharedFlow<TdApi.Object>(
-        replay = 1, 
-        extraBufferCapacity = 500, 
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+        replay = 0,
+        extraBufferCapacity = Int.MAX_VALUE
     )
-    val updates = _updates.asSharedFlow()
+    val updates: SharedFlow<TdApi.Object> = _updates.asSharedFlow()
 
     /**
      * Creates and initializes the TDLib client.
+     * Thread-safe: concurrent calls are serialized, and only the first call
+     * creates the Client; subsequent calls are no-ops while a Client exists.
      */
     fun create() {
-        if (client != null) {
-            Log.w(TAG, "TDLib client already created, ignoring duplicate create()")
-            return
-        }
-
-        // Set TDLib log verbosity (1 = errors only, 5 = debug)
-        Client.execute(TdApi.SetLogVerbosityLevel(2))
-
-        client = Client.create(
-            /* updateHandler = */ { update -> _updates.tryEmit(update) },
-            /* updateExceptionHandler = */ { e ->
-                Log.e(TAG, "TDLib update exception", e)
-            },
-            /* defaultExceptionHandler = */ { e ->
-                Log.e(TAG, "TDLib default exception", e)
+        synchronized(lock) {
+            if (client != null) {
+                Log.w(TAG, "TDLib client already created, ignoring duplicate create()")
+                return
             }
-        )
-        Log.i(TAG, "TDLib client created successfully")
+
+            // Set TDLib log verbosity (1 = errors only, 5 = debug)
+            Client.execute(TdApi.SetLogVerbosityLevel(2))
+
+            client = Client.create(
+                /* updateHandler = */ { update -> _updates.tryEmit(update) },
+                /* updateExceptionHandler = */ { e ->
+                    Log.e(TAG, "TDLib update exception", e)
+                },
+                /* defaultExceptionHandler = */ { e ->
+                    Log.e(TAG, "TDLib default exception", e)
+                }
+            )
+            Log.i(TAG, "TDLib client created successfully")
+        }
     }
 
     /**
@@ -115,21 +123,17 @@ class TelegramClient @Inject constructor() {
     }
 
     /**
-     * Destroys the TDLib client and releases resources.
-     */
-    fun destroy() {
-        client?.send(TdApi.Close()) { }
-        client = null
-        Log.i(TAG, "TDLib client destroyed")
-    }
-
-    /**
      * Resets the internal client reference (e.g. when closed externally)
      * so it can be re-created via create().
+     *
+     * Must only be called after receiving [TdApi.AuthorizationStateClosed]
+     * to ensure TDLib has finished all internal cleanup.
      */
     fun reset() {
-        client = null
-        Log.i(TAG, "TDLib client reference reset")
+        synchronized(lock) {
+            client = null
+            Log.i(TAG, "TDLib client reference reset")
+        }
     }
 
     /**

@@ -119,6 +119,7 @@ fun LoginScreen(
                         PasswordInput(
                             hint = state.passwordHint,
                             hasRecoveryEmail = state.hasRecoveryEmail,
+                            errorMessage = state.errorMessage,
                             onSubmit = { viewModel.sendPassword(it) },
                             onRequestRecovery = { viewModel.requestPasswordRecovery() }
                         )
@@ -275,6 +276,7 @@ private fun CodeInput(codeType: String, onSubmit: (String) -> Unit) {
 private fun PasswordInput(
     hint: String,
     hasRecoveryEmail: Boolean,
+    errorMessage: String? = null,
     onSubmit: (String) -> Unit,
     onRequestRecovery: () -> Unit
 ) {
@@ -301,6 +303,14 @@ private fun PasswordInput(
                 text = "Hint: $hint",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (!errorMessage.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = errorMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
             )
         }
         Spacer(modifier = Modifier.height(24.dp))
