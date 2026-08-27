@@ -6,15 +6,20 @@ import android.util.Log
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
+import com.sinxn.teledrive.data.crypto.EncryptionManager
 import com.sinxn.teledrive.data.crypto.FileCryptor
+import com.sinxn.teledrive.data.telegram.AuthManager
+import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +28,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.sinxn.teledrive.data.model.SyncStatus
@@ -43,7 +50,9 @@ class FileRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val fileDao: FileDao,
     private val telegramClient: TelegramClient,
+    private val authManager: AuthManager,
     private val securePrefs: SecurePrefs,
+    private val encryptionManager: EncryptionManager,
     private val fileCryptor: FileCryptor,
     private val metadataManager: MetadataManager
 ) : FileRepository {
@@ -372,6 +381,7 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun uploadFile(uri: Uri, userId: String, parentId: String?): String {
         return withContext(Dispatchers.IO) {
             try {
+                ensureReadyForTransfer()
                 val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, uri)
                 val originalName = pickedFile.displayName
                 val targetChatId = resolveTargetChatId(userId)
@@ -402,6 +412,7 @@ class FileRepositoryImpl @Inject constructor(
         }
 
         withContext(Dispatchers.IO) {
+            ensureReadyForTransfer()
             val resolvedFile = resolveLatestDownloadableFile(file) ?: file
             val fileIdStr = resolvedFile.fileId
             if (fileIdStr.isNullOrBlank()) {
@@ -427,26 +438,20 @@ class FileRepositoryImpl @Inject constructor(
             _downloadEvents.emit(DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Checking cache..."))
             _downloadEvents.emit(DownloadEvent.Progress(resolvedFile.id, 0.01f, "Checking cache..."))
 
-            telegramClient.sendAsync(TdApi.DownloadFile(fileId, 32, 0, 0, false)) { result ->
-                if (result is TdApi.Error) {
-                    pendingDownloads.remove(fileId)
-                    pendingDownloadEntityIds.remove(fileId)
-                    Log.e("FileRepositoryImpl", "Failed to start download: ${result.message}")
-                    _downloadEvents.tryEmit(
-                        DownloadEvent.Failure(resolvedFile.id, resolvedFile.name, result.message ?: "Failed to start download")
-                    )
-                } else if (result is TdApi.File && result.local.isDownloadingCompleted && result.local.path.isNotEmpty()) {
-                    _downloadEvents.tryEmit(
-                        DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Preparing cached file...")
-                    )
-                    handleCompletedDownload(result)
-                } else {
-                    Log.d("FileRepositoryImpl", "Download queued for ${resolvedFile.name}")
-                    _downloadEvents.tryEmit(
-                        DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Downloading from Telegram...")
-                    )
-                }
+            val tdFile = downloadTelegramFileWithPolling(fileId)
+            if (tdFile == null) {
+                pendingDownloads.remove(fileId)
+                pendingDownloadEntityIds.remove(fileId)
+                _downloadEvents.emit(
+                    DownloadEvent.Failure(resolvedFile.id, resolvedFile.name, "Download timed out or failed to start")
+                )
+                return@withContext
             }
+
+            _downloadEvents.emit(
+                DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Preparing cached file...")
+            )
+            handleCompletedDownload(tdFile)
         }
     }
 
@@ -511,6 +516,7 @@ class FileRepositoryImpl @Inject constructor(
     }
 
     private suspend fun downloadMultipartFile(file: FileEntity) {
+        ensureReadyForTransfer()
         val originalName = file.originalFileName ?: file.name
         val chunks = fileDao.getMultipartFiles(file.userId, originalName)
         if (chunks.isEmpty()) {
@@ -530,9 +536,8 @@ class FileRepositoryImpl @Inject constructor(
                         return
                     }
 
-                    val result = telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, true))
-                    val tdFile = result as? TdApi.File
-                        ?: throw IllegalStateException("Chunk download failed for $originalName")
+                    val tdFile = downloadTelegramFileWithPolling(fileId)
+                        ?: throw IllegalStateException("Chunk download timed out or failed for $originalName")
 
                     val downloadedFile = java.io.File(tdFile.local.path)
                     val decryptedChunk = java.io.File(context.cacheDir, "dec_${java.util.UUID.randomUUID()}_${resolvedChunk.name}")
@@ -588,6 +593,7 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun replaceFile(existingFile: FileEntity, newContentUri: Uri) {
         withContext(Dispatchers.IO) {
+            ensureReadyForTransfer()
             val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, newContentUri)
             val targetChatId = resolveTargetChatId(existingFile.userId)
 
@@ -658,7 +664,8 @@ class FileRepositoryImpl @Inject constructor(
 
     /**
      * Handles replacement for multipart (chunked) files.
-     * Deletes all old chunk messages from Telegram, then re-uploads the new content.
+     * Uploads the new content first, confirms Telegram upload success,
+     * and only then deletes old chunk messages and database records.
      */
     private suspend fun replaceMultipartFile(
         existingFile: FileEntity,
@@ -669,39 +676,107 @@ class FileRepositoryImpl @Inject constructor(
         val originalName = existingFile.originalFileName ?: existingFile.name
         val chunks = fileDao.getMultipartFiles(existingFile.userId, originalName)
 
-        // 1. Delete all old chunk messages from Telegram
-        val messageIds = chunks.mapNotNull { it.messageId?.toLongOrNull() }.toLongArray()
-        if (messageIds.isNotEmpty()) {
-            try {
-                telegramClient.send(TdApi.DeleteMessages(chatId, messageIds, true))
-                Log.d("FileRepositoryImpl", "Deleted ${messageIds.size} old chunk messages for '$originalName'")
-            } catch (e: Exception) {
-                Log.e("FileRepositoryImpl", "Failed to delete old chunk messages", e)
+        val tempDir = java.io.File(context.cacheDir, "replace_mp_${java.util.UUID.randomUUID()}").apply {
+            mkdirs()
+        }
+        val encFileName = "${existingFile.name}.enc"
+        val encFile = java.io.File(tempDir, encFileName)
+
+        try {
+            _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Encrypting replacement..."))
+
+            val bytesRead = context.contentResolver.openInputStream(newContentUri)?.use { sourceStream ->
+                fileCryptor.encryptStream(sourceStream, encFile)
+            } ?: error("Could not open replacement file")
+
+            if (bytesRead <= 0L) {
+                error("Replacement file is empty or could not be read")
             }
-        }
 
-        // 2. Hard-delete all chunk records from Room
-        for (chunk in chunks) {
-            fileDao.hardDeleteFile(chunk.id)
-        }
+            if (existingFile.parentId != null) {
+                enqueuePendingParent(encFile.name, existingFile.parentId)
+            }
+            enqueueUploadMeta(encFile.name, UploadMeta(existingFile.name, existingFile.mimeType))
 
-        // 3. Upload the new content as a fresh file (preserving folder context)
-        _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
-
-        context.contentResolver.openInputStream(newContentUri)?.use { sourceStream ->
-            uploadEncryptedContainer(
-                sourceStream = sourceStream,
-                chatId = chatId,
-                encryptedFileName = "${existingFile.name}.enc",
-                storedDisplayName = existingFile.name,
-                mimeType = existingFile.mimeType,
-                parentId = existingFile.parentId
+            val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
+            val inputMessageContent = TdApi.InputMessageDocument(
+                inputFile,
+                null,
+                true,
+                null
             )
-        } ?: error("Could not open replacement file")
+            val sendMessage = TdApi.SendMessage(
+                chatId,
+                null,
+                null,
+                null,
+                null,
+                inputMessageContent
+            )
 
-        saveMetadataRemote(existingFile.userId)
-        _downloadEvents.emit(DownloadEvent.Success(existingFile.id, existingFile.name))
-        Log.d("FileRepositoryImpl", "Replaced multipart file '$originalName' (deleted ${messageIds.size} chunks, re-uploaded)")
+            _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
+
+            val sendResultObj = telegramClient.send(sendMessage)
+            val tempMessage = sendResultObj as? TdApi.Message
+                ?: error("Failed to initiate replacement upload: unexpected response $sendResultObj")
+
+            val tempMsgId = tempMessage.id
+            val updateResult = telegramClient.updates.filter { update ->
+                (update is TdApi.UpdateMessageSendSucceeded && update.oldMessageId == tempMsgId) ||
+                (update is TdApi.UpdateMessageSendFailed && update.oldMessageId == tempMsgId)
+            }.first()
+
+            when (updateResult) {
+                is TdApi.UpdateMessageSendSucceeded -> {
+                    // 1. Delete all old chunk messages from Telegram now that replacement is confirmed
+                    val messageIds = chunks.mapNotNull { it.messageId?.toLongOrNull() }.toLongArray()
+                    if (messageIds.isNotEmpty()) {
+                        try {
+                            telegramClient.send(TdApi.DeleteMessages(chatId, messageIds, true))
+                            Log.d("FileRepositoryImpl", "Deleted ${messageIds.size} old chunk messages for '$originalName'")
+                        } catch (e: Exception) {
+                            Log.e("FileRepositoryImpl", "Failed to delete old chunk messages after replacement", e)
+                        }
+                    }
+
+                    // 2. Hard-delete old chunk records from Room
+                    for (chunk in chunks) {
+                        fileDao.hardDeleteFile(chunk.id)
+                    }
+
+                    saveMetadataRemote(existingFile.userId)
+                    _downloadEvents.emit(DownloadEvent.Success(existingFile.id, existingFile.name))
+                    Log.d("FileRepositoryImpl", "Successfully replaced multipart file '$originalName' (deleted ${messageIds.size} old chunks)")
+                }
+                is TdApi.UpdateMessageSendFailed -> {
+                    dequeuePendingParent(encFile.name)
+                    dequeueUploadMeta(encFile.name)
+                    val errorMsg = updateResult.error?.message?.ifBlank { null }
+                        ?: "Upload failed (code: ${updateResult.error?.code})"
+                    Log.e("FileRepositoryImpl", "Replacement upload failed: $errorMsg")
+                    _downloadEvents.emit(
+                        DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: $errorMsg")
+                    )
+                }
+                else -> {
+                    dequeuePendingParent(encFile.name)
+                    dequeueUploadMeta(encFile.name)
+                    _downloadEvents.emit(
+                        DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: unexpected update")
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            dequeuePendingParent(encFile.name)
+            dequeueUploadMeta(encFile.name)
+            Log.e("FileRepositoryImpl", "Failed to replace multipart file '$originalName'", e)
+            _downloadEvents.emit(
+                DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: ${e.message ?: "Unknown error"}")
+            )
+        } finally {
+            encFile.delete()
+            tempDir.delete()
+        }
     }
 
     override suspend fun initializeVault(userId: String) {
@@ -937,6 +1012,7 @@ class FileRepositoryImpl @Inject constructor(
         placeholderId: String?
     ): String {
         return withContext(Dispatchers.IO) {
+            ensureReadyForTransfer()
             val targetChatId = resolveTargetChatId(userId)
             val cleanName = displayName.trim().takeIf { it.isNotBlank() } ?: "Untitled"
             val encFileName = if (cleanName.endsWith(".enc")) cleanName else "$cleanName.enc"
@@ -990,6 +1066,9 @@ class FileRepositoryImpl @Inject constructor(
                         encFile.delete()
                         tempDir.delete()
                         Log.e("FileRepositoryImpl", "Failed to queue SAF upload: ${result.message}")
+                        _downloadEvents.tryEmit(
+                            DownloadEvent.Failure(null, cleanName, result.message ?: "Failed to queue upload")
+                        )
                     } else {
                         encFile.deleteOnExit()
                         tempDir.deleteOnExit()
@@ -1008,6 +1087,7 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun replaceSafFile(existingFile: FileEntity, tempFile: java.io.File) {
         withContext(Dispatchers.IO) {
             try {
+                ensureReadyForTransfer()
                 val targetChatId = resolveTargetChatId(existingFile.userId)
                 val messageId = existingFile.messageId?.toLongOrNull()
                     ?: error("Cannot replace file without a Telegram message ID")
@@ -1065,10 +1145,75 @@ class FileRepositoryImpl @Inject constructor(
         return if (configuredChatId != null) {
             configuredChatId
         } else {
-            val chat = telegramClient.send(
-                TdApi.CreatePrivateChat(userId.toLong(), true)
-            ) as TdApi.Chat
-            chat.id
+            val uid = userId.toLongOrNull() ?: error("Invalid user ID: $userId")
+            val result = runCatching {
+                telegramClient.send(TdApi.CreatePrivateChat(uid, true))
+            }.getOrElse { e ->
+                error("Failed to connect to Telegram: ${e.message}")
+            }
+            if (result is TdApi.Chat) {
+                result.id
+            } else {
+                error("Unexpected result when resolving chat: $result")
+            }
+        }
+    }
+
+    private suspend fun ensureReadyForTransfer() {
+        if (!encryptionManager.isUnlocked) {
+            error("Vault is locked. Please unlock first.")
+        }
+
+        if (!authManager.isStarted) {
+            authManager.startClient()
+        }
+
+        if (authManager.authState.value is AuthState.Ready) {
+            return
+        }
+
+        val state = withTimeoutOrNull(15_000L) {
+            authManager.authState
+                .filter { it is AuthState.Ready || it is AuthState.Error || it is AuthState.WaitPhoneNumber }
+                .first()
+        }
+
+        when (state) {
+            is AuthState.Ready -> return
+            is AuthState.Error -> error("Telegram is not ready: ${state.message}")
+            is AuthState.WaitPhoneNumber -> error("Telegram session expired. Please log in again.")
+            else -> error("Telegram is not ready. Please try again.")
+        }
+    }
+
+    private suspend fun downloadTelegramFileWithPolling(
+        fileId: Int,
+        timeoutMillis: Long = 60_000L
+    ): TdApi.File? {
+        val initialFile = runCatching {
+            telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, false)) as? TdApi.File
+        }.getOrElse { e ->
+            Log.e("FileRepositoryImpl", "Failed to start download for $fileId", e)
+            return null
+        }
+
+        if (initialFile != null && initialFile.local.isDownloadingCompleted && initialFile.local.path.isNotEmpty()) {
+            return initialFile
+        }
+
+        return withTimeoutOrNull(timeoutMillis) {
+            while (true) {
+                val fileState = runCatching {
+                    telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
+                }.getOrNull()
+
+                if (fileState != null && fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
+                    return@withTimeoutOrNull fileState
+                }
+
+                delay(500L)
+            }
+            null
         }
     }
 
@@ -1078,10 +1223,11 @@ class FileRepositoryImpl @Inject constructor(
             file.chatId != null && file.chatId != 0L -> file.chatId
             securePrefs.getStorageChannelId() != null -> securePrefs.getStorageChannelId()
             else -> {
-                val chat = telegramClient.send(
-                    TdApi.CreatePrivateChat(file.userId.toLong(), true)
-                ) as TdApi.Chat
-                chat.id
+                val uid = file.userId.toLongOrNull() ?: return file
+                val result = runCatching {
+                    telegramClient.send(TdApi.CreatePrivateChat(uid, true))
+                }.getOrNull() as? TdApi.Chat ?: return file
+                result.id
             }
         } ?: return file
 
@@ -1158,6 +1304,9 @@ class FileRepositoryImpl @Inject constructor(
                 encFile.delete()
                 tempDir.delete()
                 Log.e("FileRepositoryImpl", "Failed to queue upload part: ${result.message}")
+                _downloadEvents.tryEmit(
+                    DownloadEvent.Failure(null, storedDisplayName, result.message ?: "Failed to queue upload")
+                )
             } else {
                 encFile.deleteOnExit()
                 tempDir.deleteOnExit()

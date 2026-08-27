@@ -11,7 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * Kotlin wrapper around TDLib's [Client] providing a coroutine-friendly API.
@@ -36,14 +36,14 @@ class TelegramClient @Inject constructor() {
         }
     }
 
+    @Volatile
     private var client: Client? = null
     
     // Broadcasts all unsolicited updates from Telegram (new messages, auth state, file progress).
-    // replay = 100 ensures that subscribers who attach slightly late (due to coroutine dispatch delays)
-    // don't miss the initial burst of initialization updates from TDLib.
+    // Buffer capacity is sized to absorb high-throughput update bursts without dropping critical events.
     private val _updates = MutableSharedFlow<TdApi.Object>(
-        replay = 100, 
-        extraBufferCapacity = 100, 
+        replay = 1, 
+        extraBufferCapacity = 500, 
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
     )
     val updates = _updates.asSharedFlow()
@@ -78,14 +78,16 @@ class TelegramClient @Inject constructor() {
      */
     suspend fun send(function: TdApi.Function<*>): TdApi.Object = withContext(Dispatchers.IO) {
         val currentClient = client ?: throw IllegalStateException("TDLib client not created. Call create() first.")
-        suspendCoroutine { continuation ->
+        suspendCancellableCoroutine { continuation ->
             currentClient.send(function) { result ->
-                if (result is TdApi.Error) {
-                    continuation.resumeWithException(
-                        TdLibException(result.code, result.message)
-                    )
-                } else {
-                    continuation.resume(result)
+                if (continuation.isActive) {
+                    if (result is TdApi.Error) {
+                        continuation.resumeWithException(
+                            TdLibException(result.code, result.message)
+                        )
+                    } else {
+                        continuation.resume(result)
+                    }
                 }
             }
         }
@@ -106,6 +108,15 @@ class TelegramClient @Inject constructor() {
         client?.send(TdApi.Close()) { }
         client = null
         Log.i(TAG, "TDLib client destroyed")
+    }
+
+    /**
+     * Resets the internal client reference (e.g. when closed externally)
+     * so it can be re-created via create().
+     */
+    fun reset() {
+        client = null
+        Log.i(TAG, "TDLib client reference reset")
     }
 
     /**

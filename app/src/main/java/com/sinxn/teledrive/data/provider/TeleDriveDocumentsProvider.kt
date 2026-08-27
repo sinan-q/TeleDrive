@@ -24,10 +24,9 @@ import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
 import com.sinxn.teledrive.di.DocumentsProviderEntryPoint
 import dagger.hilt.android.EntryPointAccessors
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -538,7 +537,11 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
 
     private suspend fun uploadWrittenSafFile(documentId: String, tempFile: File) {
         try {
-            ensureTdLibAndVaultReady()
+            if (!ensureTdLibAndVaultReady()) {
+                Log.w(TAG, "TDLib or vault not ready for SAF write upload: $documentId")
+                tempFile.delete()
+                return
+            }
             if (!tempFile.exists()) {
                 Log.w(TAG, "Written temp file for $documentId does not exist")
                 tempFile.delete()
@@ -651,17 +654,27 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         return if (configuredChatId != null) {
             configuredChatId
         } else {
-            val chat = telegramClient.send(
-                TdApi.CreatePrivateChat(userId.toLong(), true)
-            ) as TdApi.Chat
-            chat.id
+            val uid = userId.toLongOrNull() ?: error("Invalid user ID: $userId")
+            val result = runCatching {
+                telegramClient.send(TdApi.CreatePrivateChat(uid, true))
+            }.getOrElse { e ->
+                error("Failed to connect to Telegram: ${e.message}")
+            }
+            if (result is TdApi.Chat) {
+                result.id
+            } else {
+                error("Unexpected result when resolving chat: $result")
+            }
         }
     }
 
     private fun triggerRemoteMetadataSync(userId: String) {
         providerScope.launch(Dispatchers.IO) {
             try {
-                ensureTdLibAndVaultReady()
+                if (!ensureTdLibAndVaultReady()) {
+                    Log.w(TAG, "Skipping metadata sync because TDLib or vault is not ready")
+                    return@launch
+                }
                 val chatId = resolveTargetChatId(userId)
                 val messageId = securePrefs.getMetadataMessageId()
                 if (messageId != null && messageId != 0L) {
@@ -734,40 +747,38 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
                 }
             }
 
-            val downloadResult = telegramClient.send(
-                TdApi.DownloadFile(fileId, 32, 0, 0, true)
-            )
+            signal?.setOnCancelListener {
+                telegramClient.sendAsync(TdApi.CancelDownloadFile(fileId, false))
+            }
 
-            if (downloadResult is TdApi.Error) {
-                Log.e(TAG, "TDLib downloadFile failed for $fileId: ${downloadResult.message}")
+            val initialFile = runCatching {
+                telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, false)) as? TdApi.File
+            }.getOrElse { e ->
+                Log.e(TAG, "TDLib downloadFile failed for $fileId", e)
                 return@runBlocking null
             }
 
-            if (downloadResult is TdApi.File && downloadResult.local.isDownloadingCompleted) {
-                return@runBlocking downloadResult
+            if (initialFile != null && initialFile.local.isDownloadingCompleted && initialFile.local.path.isNotEmpty()) {
+                return@runBlocking initialFile
             }
 
-            val deferred = CompletableDeferred<TdApi.File>()
-
-            signal?.setOnCancelListener {
-                deferred.cancel()
-            }
-
-            val job = Job()
-            CoroutineScope(job + Dispatchers.IO).launch {
-                telegramClient.updates.collect { update ->
-                    if (update is TdApi.UpdateFile && update.file.id == fileId) {
-                        if (update.file.local.isDownloadingCompleted && update.file.local.path.isNotEmpty()) {
-                            deferred.complete(update.file)
-                        }
+            withTimeoutOrNull(60_000L) {
+                while (true) {
+                    if (signal?.isCanceled == true) {
+                        return@withTimeoutOrNull null
                     }
-                }
-            }
 
-            try {
-                deferred.await()
-            } finally {
-                job.cancel()
+                    val fileState = runCatching {
+                        telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
+                    }.getOrNull()
+
+                    if (fileState != null && fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
+                        return@withTimeoutOrNull fileState
+                    }
+
+                    delay(500L)
+                }
+                null
             }
         }
     }

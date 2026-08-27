@@ -1,6 +1,10 @@
 package com.sinxn.teledrive.data.telegram
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.util.Log
 import com.sinxn.teledrive.BuildConfig
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
@@ -9,7 +13,9 @@ import com.sinxn.teledrive.data.repository.UserRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,8 +51,16 @@ class AuthManager @Inject constructor(
 
     // Scope for collecting SharedFlow events from TelegramClient
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var updatesJob: Job? = null
     private val hasStarted = AtomicBoolean(false)
     val isStarted: Boolean get() = hasStarted.get()
+
+    private var lastClosedTimestamp: Long = 0L
+    private var rapidReconnectCount: Int = 0
+
+    init {
+        registerNetworkCallback()
+    }
 
     /**
      * Starts the TDLib client and begins listening for auth state updates.
@@ -60,7 +74,8 @@ class AuthManager @Inject constructor(
 
         telegramClient.create()
         
-        scope.launch {
+        updatesJob?.cancel()
+        updatesJob = scope.launch {
             telegramClient.updates.collect { update ->
                 when (update) {
                     is TdApi.UpdateAuthorizationState -> handleAuthState(update.authorizationState)
@@ -115,13 +130,32 @@ class AuthManager @Inject constructor(
                 clearCachedUser()
             }
             is TdApi.AuthorizationStateClosed -> {
-                securePrefs.setHasSession(false)
-                securePrefs.setSetupStep(com.sinxn.teledrive.data.local.prefs.SetupStep.LOGIN)
-                securePrefs.clearUserId()
-                securePrefs.clearAutoUnlockSecret()
-                securePrefs.clearBiometricUnlockSecret()
+                Log.d(TAG, "TDLib client closed")
+                telegramClient.reset()
+                hasStarted.set(false)
                 _authState.value = AuthState.Closed
-                clearCachedUser()
+                
+                // If the client closed while we still have a valid session, auto-restart with backoff throttling
+                if (securePrefs.hasSession()) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastClosedTimestamp < 10000L) {
+                        rapidReconnectCount++
+                    } else {
+                        rapidReconnectCount = 1
+                    }
+                    lastClosedTimestamp = now
+
+                    if (rapidReconnectCount > 3) {
+                        Log.e(TAG, "TDLib closed repeatedly ($rapidReconnectCount times). Halting auto-restart to protect battery/state.")
+                        _authState.value = AuthState.Error("Telegram client stopped unexpectedly. Please restart the app.")
+                    } else {
+                        Log.d(TAG, "Client closed with active session. Reinitializing in 500ms (attempt $rapidReconnectCount)...")
+                        scope.launch {
+                            delay(500L)
+                            startClient()
+                        }
+                    }
+                }
             }
             is TdApi.AuthorizationStateClosing -> {
                 // Transitional state, no action needed
@@ -139,7 +173,7 @@ class AuthManager @Inject constructor(
             useSecretChats = false
             apiId = BuildConfig.TELEGRAM_API_ID
             apiHash = BuildConfig.TELEGRAM_API_HASH
-            systemLanguageCode = "en"
+            systemLanguageCode = java.util.Locale.getDefault().language.takeIf { !it.isNullOrBlank() } ?: "en"
             deviceModel = android.os.Build.MODEL
             systemVersion = android.os.Build.VERSION.RELEASE
             applicationVersion = BuildConfig.VERSION_NAME
@@ -150,6 +184,40 @@ class AuthManager @Inject constructor(
                 Log.e(TAG, "SetTdlibParameters failed: ${result.code} ${result.message}")
                 _authState.value = AuthState.Error("TDLib init failed: ${result.message}")
             }
+        }
+    }
+
+    private fun registerNetworkCallback() {
+        runCatching {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            val networkRequest = NetworkRequest.Builder().build()
+            connectivityManager.registerNetworkCallback(networkRequest, object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    updateNetworkType(connectivityManager)
+                }
+                override fun onLost(network: Network) {
+                    updateNetworkType(connectivityManager)
+                }
+                override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                    updateNetworkType(connectivityManager)
+                }
+            })
+        }.onFailure { e ->
+            Log.w(TAG, "Failed to register network callback", e)
+        }
+    }
+
+    private fun updateNetworkType(connectivityManager: ConnectivityManager) {
+        val activeNetwork = connectivityManager.activeNetwork
+        val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
+        val tdNetworkType = when {
+            caps == null -> TdApi.NetworkTypeNone()
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> TdApi.NetworkTypeWiFi()
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> TdApi.NetworkTypeMobile()
+            else -> TdApi.NetworkTypeOther()
+        }
+        if (telegramClient.isActive) {
+            telegramClient.sendAsync(TdApi.SetNetworkType(tdNetworkType))
         }
     }
 

@@ -16,6 +16,7 @@ import com.sinxn.teledrive.data.repository.RemoteSyncCheck
 import com.sinxn.teledrive.data.repository.UserRepository
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
+import com.sinxn.teledrive.data.crypto.EncryptionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -52,6 +53,7 @@ class HomeViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val securePrefs: SecurePrefs,
     private val authManager: AuthManager,
+    private val encryptionManager: EncryptionManager,
     private val metadataManager: MetadataManager,
     private val backupManager: BackupManager,
     private val application: Application
@@ -93,11 +95,16 @@ class HomeViewModel @Inject constructor(
         _fileToReplace.value = null
         viewModelScope.launch {
             try {
+                if (!encryptionManager.isUnlocked) {
+                    _snackbarEvents.emit("Vault is locked. Please unlock first.")
+                    return@launch
+                }
                 val activeUserId = userId.takeIf { it.isNotBlank() } ?: securePrefs.getUserId()
                 if (activeUserId.isNullOrBlank()) {
                     _snackbarEvents.emit("User ID not loaded. Please try again.")
                     return@launch
                 }
+                _snackbarEvents.emit("Replacing \"${target.name}\"...")
                 fileRepository.replaceFile(target, uri)
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error replacing file", e)
@@ -109,6 +116,10 @@ class HomeViewModel @Inject constructor(
     fun onFileSelectedForUpload(uri: Uri) {
         viewModelScope.launch {
             try {
+                if (!encryptionManager.isUnlocked) {
+                    _snackbarEvents.emit("Vault is locked. Please unlock first.")
+                    return@launch
+                }
                 // Read from prefs if userId is not populated yet
                 val activeUserId = userId.takeIf { it.isNotBlank() } ?: securePrefs.getUserId()
                 if (activeUserId.isNullOrBlank()) {
@@ -122,7 +133,7 @@ class HomeViewModel @Inject constructor(
                 _snackbarEvents.emit("Uploading \"$fileName\"...")
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error processing file upload", e)
-                _snackbarEvents.emit("Upload failed")
+                _snackbarEvents.emit("Upload failed: ${e.message}")
             }
         }
     }
@@ -184,7 +195,8 @@ class HomeViewModel @Inject constructor(
                                 remove(fileId)
                             }
                         }
-                        _snackbarEvents.emit("Download failed for \"${event.fileName}\": ${event.reason}")
+                        val prefix = if (event.fileId == null) "Transfer failed" else "Download failed"
+                        _snackbarEvents.emit("$prefix for \"${event.fileName}\": ${event.reason}")
                     }
                 }
             }
