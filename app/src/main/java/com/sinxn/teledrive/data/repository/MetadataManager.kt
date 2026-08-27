@@ -5,6 +5,7 @@ import android.util.Log
 import com.sinxn.teledrive.data.backup.BackupManager
 import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.telegram.TelegramClient
+import com.sinxn.teledrive.data.telegram.TdLibException
 import com.sinxn.teledrive.data.local.prefs.SecurePrefs
 import com.sinxn.teledrive.data.local.prefs.SetupStep
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -85,13 +86,15 @@ class MetadataManager @Inject constructor(
             TdApi.FormattedText(METADATA_CAPTION, emptyArray())
         )
         
-        val result = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, content))
-        tempFile.delete()
-        
-        if (result is TdApi.Error) {
-            if (result.code == 420) {
+        val (result, effectiveTimestamp) = try {
+            val res = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, content))
+            tempFile.delete()
+            Pair(res, timestamp)
+        } catch (e: TdLibException) {
+            tempFile.delete()
+            if (e.code == 420) {
                 // FLOOD_WAIT: parse wait time from error message and retry once
-                val waitSeconds = result.message
+                val waitSeconds = e.message
                     .substringAfter("FLOOD_WAIT_", "5")
                     .toIntOrNull() ?: 5
                 Log.w("MetadataManager", "FLOOD_WAIT_$waitSeconds for message $messageId, retrying after delay...")
@@ -111,22 +114,28 @@ class MetadataManager @Inject constructor(
                     TdApi.FormattedText(METADATA_CAPTION, emptyArray())
                 )
 
-                val retryResult = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, retryContent))
-                retryFile.delete()
-
-                if (retryResult is TdApi.Error) {
-                    Log.e("MetadataManager", "Retry failed for metadata message $messageId: ${retryResult.message}")
-                } else {
+                try {
+                    val retryResult = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, retryContent))
+                    retryFile.delete()
                     Log.d("MetadataManager", "Successfully updated metadata message $messageId after FLOOD_WAIT retry")
-                    return retryTimestamp
+                    Pair(retryResult, retryTimestamp)
+                } catch (retryEx: Exception) {
+                    retryFile.delete()
+                    Log.e("MetadataManager", "Retry failed for metadata message $messageId: ${retryEx.message}", retryEx)
+                    throw retryEx
                 }
             } else {
-                Log.e("MetadataManager", "Failed to update metadata message $messageId: ${result.message}")
+                Log.e("MetadataManager", "Failed to update metadata message $messageId: ${e.message}", e)
+                throw e
             }
-        } else {
-            Log.d("MetadataManager", "Successfully updated metadata message $messageId")
+        } catch (e: Exception) {
+            tempFile.delete()
+            Log.e("MetadataManager", "Unexpected failure updating metadata message $messageId", e)
+            throw e
         }
-        return timestamp
+
+        Log.d("MetadataManager", "Successfully updated metadata message $messageId")
+        return effectiveTimestamp
     }
 
     /**
@@ -369,9 +378,8 @@ class MetadataManager @Inject constructor(
                     CheckStoredMetadataResult.NotFound(messageId, "Message content is not vault metadata")
                 }
             } else {
-                val errorMsg = (result as? TdApi.Error)?.message ?: "Message not found"
-                Log.w("MetadataManager", "Metadata message $messageId not found: $errorMsg")
-                CheckStoredMetadataResult.NotFound(messageId, errorMsg)
+                Log.w("MetadataManager", "Metadata message $messageId not found or unexpected object: $result")
+                CheckStoredMetadataResult.NotFound(messageId, "Unexpected TDLib response")
             }
         } catch (e: Exception) {
             Log.e("MetadataManager", "Exception checking stored metadata message $messageId", e)

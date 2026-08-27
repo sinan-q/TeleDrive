@@ -648,9 +648,17 @@ class FileRepositoryImpl @Inject constructor(
 
                 _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
 
-                val result = telegramClient.send(
-                    TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
-                )
+                val result = try {
+                    telegramClient.send(
+                        TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
+                    )
+                } catch (e: Exception) {
+                    Log.e("FileRepositoryImpl", "EditMessageMedia failed: ${e.message}", e)
+                    _downloadEvents.emit(
+                        DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: ${e.message}")
+                    )
+                    throw e
+                }
 
                 // 3. Handle result
                 if (result is TdApi.Message) {
@@ -673,11 +681,13 @@ class FileRepositoryImpl @Inject constructor(
                     saveMetadataRemote(existingFile.userId)
                     _downloadEvents.emit(DownloadEvent.Success(existingFile.id, existingFile.name))
                     Log.d("FileRepositoryImpl", "Replaced file '${existingFile.name}' via EditMessageMedia (msg $messageId)")
-                } else if (result is TdApi.Error) {
-                    Log.e("FileRepositoryImpl", "EditMessageMedia failed: ${result.message}")
+                } else {
+                    val err = "Unexpected response from TDLib when replacing file: $result"
+                    Log.e("FileRepositoryImpl", err)
                     _downloadEvents.emit(
-                        DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: ${result.message}")
+                        DownloadEvent.Failure(existingFile.id, existingFile.name, err)
                     )
+                    error(err)
                 }
             } finally {
                 encFile.delete()
@@ -1129,9 +1139,14 @@ class FileRepositoryImpl @Inject constructor(
                     val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
                     val inputContent = TdApi.InputMessageDocument(inputFile, null, true, null)
 
-                    val result = telegramClient.send(
-                        TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
-                    )
+                    val result = try {
+                        telegramClient.send(
+                            TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
+                        )
+                    } catch (e: Exception) {
+                        Log.e("FileRepositoryImpl", "EditMessageMedia failed for SAF file '${existingFile.name}': ${e.message}", e)
+                        throw e
+                    }
 
                     if (result is TdApi.Message) {
                         val doc = (result.content as? TdApi.MessageDocument)?.document
@@ -1152,8 +1167,8 @@ class FileRepositoryImpl @Inject constructor(
                         }
                         saveMetadataRemote(existingFile.userId)
                         Log.d("FileRepositoryImpl", "Replaced SAF file '${existingFile.name}' via EditMessageMedia (msg $messageId)")
-                    } else if (result is TdApi.Error) {
-                        Log.e("FileRepositoryImpl", "EditMessageMedia failed for SAF file: ${result.message}")
+                    } else {
+                        error("Unexpected response from TDLib when replacing SAF file: $result")
                     }
                 } finally {
                     encFile.delete()
