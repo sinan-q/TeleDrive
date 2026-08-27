@@ -498,22 +498,37 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         // If appending or read-writing an existing file, populate initial decrypted content
         val isAppendOrReadWrite = (mode.contains("a") || mode == "rw") && !mode.contains("t")
         if (isAppendOrReadWrite && !entity.fileId.isNullOrBlank()) {
+            val isReady = runBlocking(Dispatchers.IO) { ensureTdLibAndVaultReady() }
+            if (!isReady) {
+                tempFile.delete()
+                throw IllegalStateException("TeleDrive is not logged in or TDLib initialization timed out")
+            }
+            val resolved = runBlocking(Dispatchers.IO) { resolveLatestFile(entity) }
+            val fileIdInt = resolved.fileId?.toIntOrNull()
+                ?: run {
+                    tempFile.delete()
+                    throw IllegalStateException("No Telegram file ID found for ${entity.name}")
+                }
+            val tdFile = downloadTelegramFile(fileIdInt, resolved, null)
+                ?: run {
+                    tempFile.delete()
+                    throw IllegalStateException("Failed to download existing content for ${entity.name}")
+                }
+            val enc = File(tdFile.local.path)
+            if (!enc.exists()) {
+                tempFile.delete()
+                throw IllegalStateException("Downloaded file not found at ${tdFile.local.path}")
+            }
             try {
-                runBlocking(Dispatchers.IO) { ensureTdLibAndVaultReady() }
-                val resolved = runBlocking(Dispatchers.IO) { resolveLatestFile(entity) }
-                resolved.fileId?.toIntOrNull()?.let { fileIdInt ->
-                    val tdFile = downloadTelegramFile(fileIdInt, resolved, null)
-                    if (tdFile != null && File(tdFile.local.path).exists()) {
-                        val enc = File(tdFile.local.path)
-                        if (enc.name.endsWith(".enc")) {
-                            fileCryptor.decryptFile(enc, tempFile)
-                        } else {
-                            enc.copyTo(tempFile, overwrite = true)
-                        }
-                    }
+                if (enc.name.endsWith(".enc")) {
+                    fileCryptor.decryptFile(enc, tempFile)
+                } else {
+                    enc.copyTo(tempFile, overwrite = true)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Could not pre-populate existing file for append mode", e)
+                tempFile.delete()
+                Log.e(TAG, "Failed to decrypt existing content for append/rw mode", e)
+                throw IllegalStateException("Failed to decrypt existing content for ${entity.name}: ${e.message}", e)
             }
         }
 
