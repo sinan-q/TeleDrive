@@ -11,6 +11,7 @@ import com.sinxn.teledrive.data.crypto.FileCryptor
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
+import com.sinxn.teledrive.data.telegram.TdLibException
 import com.sinxn.teledrive.data.telegram.mapper.toFileEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -462,12 +463,14 @@ class FileRepositoryImpl @Inject constructor(
             _downloadEvents.emit(DownloadEvent.Status(resolvedFile.id, resolvedFile.name, "Checking cache..."))
             _downloadEvents.emit(DownloadEvent.Progress(resolvedFile.id, 0.01f, "Checking cache..."))
 
-            val tdFile = downloadTelegramFileWithPolling(fileId)
-            if (tdFile == null) {
+            val downloadResult = downloadTelegramFileWithPolling(fileId)
+            val tdFile = downloadResult.getOrElse { error ->
                 pendingDownloads.remove(fileId)
                 pendingDownloadEntityIds.remove(fileId)
+                val errorMsg = error.message?.takeIf { it.isNotBlank() } ?: "Download timed out or failed to start"
+                Log.e("FileRepositoryImpl", "Download failed for ${resolvedFile.name}: $errorMsg", error)
                 _downloadEvents.emit(
-                    DownloadEvent.Failure(resolvedFile.id, resolvedFile.name, "Download timed out or failed to start")
+                    DownloadEvent.Failure(resolvedFile.id, resolvedFile.name, errorMsg)
                 )
                 return@withContext
             }
@@ -560,8 +563,13 @@ class FileRepositoryImpl @Inject constructor(
                         return
                     }
 
-                    val tdFile = downloadTelegramFileWithPolling(fileId)
-                        ?: throw IllegalStateException("Chunk download timed out or failed for $originalName")
+                    val downloadResult = downloadTelegramFileWithPolling(fileId)
+                    val tdFile = downloadResult.getOrElse { error ->
+                        val errorMsg = error.message?.takeIf { it.isNotBlank() } ?: "Chunk download failed"
+                        Log.e("FileRepositoryImpl", "Chunk download failed for $originalName (part ${resolvedChunk.partIndex}): $errorMsg", error)
+                        _downloadEvents.emit(DownloadEvent.Failure(file.id, originalName, "Chunk download failed: $errorMsg"))
+                        throw IllegalStateException("Chunk download failed for $originalName: $errorMsg", error)
+                    }
 
                     val downloadedFile = java.io.File(tdFile.local.path)
                     val decryptedChunk = java.io.File(context.cacheDir, "dec_${java.util.UUID.randomUUID()}_${resolvedChunk.name}")
@@ -1229,32 +1237,53 @@ class FileRepositoryImpl @Inject constructor(
     private suspend fun downloadTelegramFileWithPolling(
         fileId: Int,
         timeoutMillis: Long = 60_000L
-    ): TdApi.File? {
+    ): Result<TdApi.File> {
         val initialFile = runCatching {
             telegramClient.send(TdApi.DownloadFile(fileId, 32, 0, 0, false)) as? TdApi.File
+                ?: error("DownloadFile returned unexpected response")
         }.getOrElse { e ->
             Log.e("FileRepositoryImpl", "Failed to start download for $fileId", e)
-            return null
+            return Result.failure(e)
         }
 
-        if (initialFile != null && initialFile.local.isDownloadingCompleted && initialFile.local.path.isNotEmpty()) {
-            return initialFile
+        if (initialFile.local.isDownloadingCompleted && initialFile.local.path.isNotEmpty()) {
+            return Result.success(initialFile)
         }
 
-        return withTimeoutOrNull(timeoutMillis) {
-            while (true) {
-                val fileState = runCatching {
-                    telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
-                }.getOrNull()
+        var lastError: Throwable? = null
+        val startTime = System.currentTimeMillis()
 
-                if (fileState != null && fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
-                    return@withTimeoutOrNull fileState
-                }
-
-                delay(500L)
+        while (System.currentTimeMillis() - startTime < timeoutMillis) {
+            val stateResult = runCatching {
+                telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
+                    ?: error("GetFile returned unexpected response")
             }
-            null
+
+            stateResult.fold(
+                onSuccess = { fileState ->
+                    if (fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
+                        return Result.success(fileState)
+                    }
+                    if (!fileState.local.canBeDownloaded && !fileState.local.isDownloadingActive && !fileState.local.isDownloadingCompleted) {
+                        val errMsg = "Telegram reported file cannot be downloaded"
+                        Log.e("FileRepositoryImpl", errMsg)
+                        return Result.failure(IllegalStateException(errMsg))
+                    }
+                },
+                onFailure = { err ->
+                    lastError = err
+                    Log.w("FileRepositoryImpl", "GetFile failed during polling for $fileId: ${err.message}")
+                    if (err is TdLibException && (err.code == 400 || err.code == 401 || err.code == 403 || err.code == 404)) {
+                        return Result.failure(err)
+                    }
+                }
+            )
+
+            delay(500L)
         }
+
+        val timeoutMsg = lastError?.message ?: "Download timed out after ${timeoutMillis / 1000}s"
+        return Result.failure(lastError ?: IllegalStateException(timeoutMsg))
     }
 
     private suspend fun resolveLatestDownloadableFile(file: FileEntity): FileEntity? {

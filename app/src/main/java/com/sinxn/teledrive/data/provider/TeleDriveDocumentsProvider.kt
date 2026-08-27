@@ -22,6 +22,7 @@ import com.sinxn.teledrive.data.repository.MetadataManager
 import com.sinxn.teledrive.data.telegram.AuthManager
 import com.sinxn.teledrive.data.telegram.AuthState
 import com.sinxn.teledrive.data.telegram.TelegramClient
+import com.sinxn.teledrive.data.telegram.TdLibException
 import com.sinxn.teledrive.di.DocumentsProviderEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CoroutineScope
@@ -777,24 +778,37 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
                 return@runBlocking initialFile
             }
 
-            withTimeoutOrNull(60_000L) {
-                while (true) {
-                    if (signal?.isCanceled == true) {
-                        return@withTimeoutOrNull null
-                    }
-
-                    val fileState = runCatching {
-                        telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
-                    }.getOrNull()
-
-                    if (fileState != null && fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
-                        return@withTimeoutOrNull fileState
-                    }
-
-                    delay(500L)
+            val startTime = System.currentTimeMillis()
+            while (System.currentTimeMillis() - startTime < 60_000L) {
+                if (signal?.isCanceled == true) {
+                    return@runBlocking null
                 }
-                null
+
+                val stateResult = runCatching {
+                    telegramClient.send(TdApi.GetFile(fileId)) as? TdApi.File
+                }
+
+                stateResult.fold(
+                    onSuccess = { fileState ->
+                        if (fileState != null && fileState.local.isDownloadingCompleted && fileState.local.path.isNotEmpty()) {
+                            return@runBlocking fileState
+                        }
+                        if (fileState != null && !fileState.local.canBeDownloaded && !fileState.local.isDownloadingActive && !fileState.local.isDownloadingCompleted) {
+                            Log.e(TAG, "Telegram reported file $fileId cannot be downloaded")
+                            return@runBlocking null
+                        }
+                    },
+                    onFailure = { err ->
+                        Log.w(TAG, "GetFile failed during SAF polling for $fileId: ${err.message}")
+                        if (err is TdLibException && (err.code == 400 || err.code == 401 || err.code == 403 || err.code == 404)) {
+                            return@runBlocking null
+                        }
+                    }
+                )
+
+                delay(500L)
             }
+            null
         }
     }
 
