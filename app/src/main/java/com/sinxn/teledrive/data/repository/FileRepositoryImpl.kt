@@ -380,14 +380,14 @@ class FileRepositoryImpl @Inject constructor(
                     if (configuredChatId != null) {
                         configuredChatId
                     } else {
-                        val chat = telegramClient.send(
+                        val chat = telegramClient.sendWithTimeout(
                             TdApi.CreatePrivateChat(file.userId.toLong(), true)
                         ) as TdApi.Chat
                         chat.id
                     }
                 }
                 
-                telegramClient.send(
+                telegramClient.sendWithTimeout(
                     TdApi.DeleteMessages(targetChatId, longArrayOf(msgId), true)
                 )
                 Log.d("FileRepositoryImpl", "Deleted TG message ${file.messageId}")
@@ -466,7 +466,7 @@ class FileRepositoryImpl @Inject constructor(
             val chatId = resolvedFile.chatId
                 ?: securePrefs.getStorageChannelId()
                 ?: resolveTargetChatId(resolvedFile.userId)
-            telegramClient.send(TdApi.OpenChat(chatId))
+            telegramClient.sendWithTimeout(TdApi.OpenChat(chatId))
             resolvedFile.messageId?.toLongOrNull()?.let { messageId ->
                 telegramClient.sendAsync(TdApi.OpenMessageContent(chatId, messageId))
             }
@@ -670,8 +670,9 @@ class FileRepositoryImpl @Inject constructor(
                 _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
 
                 val result = try {
-                    telegramClient.send(
-                        TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
+                    telegramClient.sendWithTimeout(
+                        TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent),
+                        30_000L
                     )
                 } catch (e: Exception) {
                     Log.e("FileRepositoryImpl", "EditMessageMedia failed: ${e.message}", e)
@@ -771,7 +772,7 @@ class FileRepositoryImpl @Inject constructor(
 
             _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
 
-            val sendResultObj = telegramClient.send(sendMessage)
+            val sendResultObj = telegramClient.sendWithTimeout(sendMessage)
             val tempMessage = sendResultObj as? TdApi.Message
                 ?: error("Failed to initiate replacement upload: unexpected response $sendResultObj")
 
@@ -787,7 +788,7 @@ class FileRepositoryImpl @Inject constructor(
                     val messageIds = chunks.mapNotNull { it.messageId?.toLongOrNull() }.toLongArray()
                     if (messageIds.isNotEmpty()) {
                         try {
-                            telegramClient.send(TdApi.DeleteMessages(chatId, messageIds, true))
+                            telegramClient.sendWithTimeout(TdApi.DeleteMessages(chatId, messageIds, true))
                             Log.d("FileRepositoryImpl", "Deleted ${messageIds.size} old chunk messages for '$originalName'")
                         } catch (e: Exception) {
                             Log.e("FileRepositoryImpl", "Failed to delete old chunk messages after replacement", e)
@@ -861,7 +862,7 @@ class FileRepositoryImpl @Inject constructor(
             }
 
             Log.d("FileRepositoryImpl", "Starting metadata sync for chat $targetChatId")
-            telegramClient.send(TdApi.OpenChat(targetChatId))
+            telegramClient.sendWithTimeout(TdApi.OpenChat(targetChatId))
 
             val cachedJson = metadataManager.consumeCachedDecryptedJson()
             if (cachedJson != null) {
@@ -940,7 +941,7 @@ class FileRepositoryImpl @Inject constructor(
             val pendingDbMessageIds = allFiles.mapNotNull { it.messageId }.toMutableSet()
 
             while (true) {
-                val searchResult = telegramClient.send(
+                val searchResult = telegramClient.sendWithTimeout(
                     TdApi.SearchChatMessages(targetChatId, null, "", null, lastMsgId, 0, 100, TdApi.SearchMessagesFilterDocument())
                 )
 
@@ -1145,7 +1146,7 @@ class FileRepositoryImpl @Inject constructor(
                 )
 
                 try {
-                    val sendResult = telegramClient.send(sendMessage)
+                    val sendResult = telegramClient.sendWithTimeout(sendMessage, 30_000L)
                     if (sendResult !is TdApi.Message) {
                         error("Unexpected response from TDLib when sending SAF upload: $sendResult")
                     }
@@ -1193,8 +1194,9 @@ class FileRepositoryImpl @Inject constructor(
                     val inputContent = TdApi.InputMessageDocument(inputFile, null, true, null)
 
                     val result = try {
-                        telegramClient.send(
-                            TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent)
+                        telegramClient.sendWithTimeout(
+                            TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent),
+                            30_000L
                         )
                     } catch (e: Exception) {
                         Log.e("FileRepositoryImpl", "EditMessageMedia failed for SAF file '${existingFile.name}': ${e.message}", e)
@@ -1240,15 +1242,9 @@ class FileRepositoryImpl @Inject constructor(
         } else {
             val uid = userId.toLongOrNull() ?: error("Invalid user ID: $userId")
             val result = runCatching {
-                telegramClient.send(TdApi.CreatePrivateChat(uid, true))
-            }.getOrElse { e ->
-                error("Failed to connect to Telegram: ${e.message}")
-            }
-            if (result is TdApi.Chat) {
-                result.id
-            } else {
-                error("Unexpected result when resolving chat: $result")
-            }
+                telegramClient.sendWithTimeout(TdApi.CreatePrivateChat(uid, true))
+            }.getOrNull() as? TdApi.Chat ?: error("Could not create private chat for user $userId")
+            result.id
         }
     }
 
@@ -1339,14 +1335,14 @@ class FileRepositoryImpl @Inject constructor(
             else -> {
                 val uid = file.userId.toLongOrNull() ?: return file
                 val result = runCatching {
-                    telegramClient.send(TdApi.CreatePrivateChat(uid, true))
+                    telegramClient.sendWithTimeout(TdApi.CreatePrivateChat(uid, true))
                 }.getOrNull() as? TdApi.Chat ?: return file
                 result.id
             }
         } ?: return file
 
         val message = runCatching {
-            telegramClient.send(TdApi.GetMessage(chatId, messageId))
+            telegramClient.sendWithTimeout(TdApi.GetMessage(chatId, messageId))
         }.getOrNull() as? TdApi.Message ?: return file
 
         val refreshed = message.toFileEntity(file.userId, file.parentId) ?: return file
@@ -1413,7 +1409,7 @@ class FileRepositoryImpl @Inject constructor(
         )
 
         try {
-            val sendResult = telegramClient.send(sendMessage)
+            val sendResult = telegramClient.sendWithTimeout(sendMessage, 30_000L)
             if (sendResult !is TdApi.Message) {
                 error("Unexpected response from TDLib when sending encrypted container: $sendResult")
             }

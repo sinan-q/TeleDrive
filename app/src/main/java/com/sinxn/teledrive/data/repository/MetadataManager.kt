@@ -53,7 +53,10 @@ class MetadataManager @Inject constructor(
             TdApi.FormattedText(METADATA_CAPTION, emptyArray())
         )
         
-        val result = telegramClient.send(TdApi.SendMessage(chatId, null, null, null, null, content))
+        val result = telegramClient.sendWithTimeout(
+            TdApi.SendMessage(chatId, null, null, null, null, content),
+            30_000L
+        )
         tempFile.delete()
         
         return if (result is TdApi.Message) {
@@ -87,7 +90,10 @@ class MetadataManager @Inject constructor(
         )
         
         val (result, effectiveTimestamp) = try {
-            val res = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, content))
+            val res = telegramClient.sendWithTimeout(
+                TdApi.EditMessageMedia(chatId, messageId, null, content),
+                30_000L
+            )
             tempFile.delete()
             Pair(res, timestamp)
         } catch (e: TdLibException) {
@@ -115,7 +121,10 @@ class MetadataManager @Inject constructor(
                 )
 
                 try {
-                    val retryResult = telegramClient.send(TdApi.EditMessageMedia(chatId, messageId, null, retryContent))
+                    val retryResult = telegramClient.sendWithTimeout(
+                        TdApi.EditMessageMedia(chatId, messageId, null, retryContent),
+                        30_000L
+                    )
                     retryFile.delete()
                     Log.d("MetadataManager", "Successfully updated metadata message $messageId after FLOOD_WAIT retry")
                     Pair(retryResult, retryTimestamp)
@@ -143,7 +152,7 @@ class MetadataManager @Inject constructor(
      * Guaranteed to locate the metadata document regardless of chat history length or message offset.
      */
     suspend fun findMetadataMessage(chatId: Long): TdApi.Message? {
-        val result = telegramClient.send(
+        val result = telegramClient.sendWithTimeout(
             TdApi.SearchChatMessages(
                 chatId,
                 null,
@@ -193,7 +202,7 @@ class MetadataManager @Inject constructor(
     }
 
     suspend fun validateStorageChat(chatId: Long): StorageValidation {
-        val chatObj = telegramClient.send(TdApi.GetChat(chatId))
+        val chatObj = telegramClient.sendWithTimeout(TdApi.GetChat(chatId))
         if (chatObj is TdApi.Chat) {
             val canWrite = chatObj.permissions?.canSendDocuments == true || chatObj.permissions?.canSendBasicMessages == true
             if (!canWrite) {
@@ -217,7 +226,7 @@ class MetadataManager @Inject constructor(
         }
 
         // 2. If no metadata message exists, check if chat has any non-service user messages
-        val historyResult = telegramClient.send(
+        val historyResult = telegramClient.sendWithTimeout(
             TdApi.GetChatHistory(chatId, 0L, 0, 100, false)
         )
         val hasUserMessages = historyResult is TdApi.Messages && historyResult.messages.any { msg ->
@@ -367,7 +376,7 @@ class MetadataManager @Inject constructor(
         Log.d("MetadataManager", "Checking stored metadata message (chatId: $chatId, messageId: $messageId)...")
 
         return try {
-            val result = telegramClient.send(TdApi.GetMessage(chatId, messageId))
+            val result = telegramClient.sendWithTimeout(TdApi.GetMessage(chatId, messageId))
             if (result is TdApi.Message) {
                 val doc = result.content as? TdApi.MessageDocument
                 if (doc != null && doc.caption.text == METADATA_CAPTION) {
@@ -408,7 +417,7 @@ class MetadataManager @Inject constructor(
         val messageId = securePrefs.getMetadataMessageId() ?: return RemoteSyncCheck.CheckFailed("No metadata message ID stored")
 
         return try {
-            val result = telegramClient.send(TdApi.GetMessage(chatId, messageId))
+            val result = telegramClient.sendWithTimeout(TdApi.GetMessage(chatId, messageId))
             if (result !is TdApi.Message) {
                 return RemoteSyncCheck.CheckFailed("Could not fetch metadata message")
             }

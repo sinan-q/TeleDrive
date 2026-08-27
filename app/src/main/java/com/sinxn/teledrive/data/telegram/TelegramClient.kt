@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import javax.inject.Inject
@@ -25,6 +26,7 @@ class TelegramClient @Inject constructor() {
 
     companion object {
         private const val TAG = "TelegramClient"
+        const val DEFAULT_REQUEST_TIMEOUT_MS = 15_000L
 
         init {
             try {
@@ -91,6 +93,17 @@ class TelegramClient @Inject constructor() {
                 }
             }
         }
+    }
+
+    /**
+     * Sends a TDLib request and suspends until the response arrives or the timeout expires.
+     * Throws [kotlinx.coroutines.TimeoutCancellationException] if timeout is exceeded.
+     */
+    suspend fun sendWithTimeout(
+        function: TdApi.Function<*>,
+        timeoutMillis: Long = DEFAULT_REQUEST_TIMEOUT_MS
+    ): TdApi.Object = withTimeout(timeoutMillis) {
+        send(function)
     }
 
     /**
