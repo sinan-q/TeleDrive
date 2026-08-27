@@ -99,13 +99,22 @@ class FileRepositoryImpl @Inject constructor(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
+    /** Maps a pending upload's encrypted filename to temporary directory for deterministic cleanup */
+    private val pendingUploadTempDirs =
+        java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue<java.io.File>>()
+
     init {
         scope.launch {
-            // Clean up any stale saf_enc_ artifact files from prior buggy sessions
+            // Clean up any stale saf_enc_ artifact files and leftover upload directories from prior sessions
             try {
                 fileDao.cleanupStaleSafArtifacts()
+                context.cacheDir.listFiles()?.forEach { file ->
+                    if (file.isDirectory && (file.name.startsWith("upload_") || file.name.startsWith("saf_upload_") || file.name.startsWith("replace_"))) {
+                        file.deleteRecursively()
+                    }
+                }
             } catch (e: Exception) {
-                Log.w("FileRepositoryImpl", "Could not clean stale SAF artifacts", e)
+                Log.w("FileRepositoryImpl", "Could not clean stale artifacts or upload temp directories", e)
             }
         }
 
@@ -230,6 +239,9 @@ class FileRepositoryImpl @Inject constructor(
                         val uploadKey = update.message.toFileEntity(activeUserId)?.localName()
                         val parentId = oldEntity?.parentId ?: uploadKey?.let(::dequeuePendingParent)
                         val safId = uploadKey?.let(::dequeuePendingSafId)
+                        if (uploadKey != null) {
+                            cleanupPendingTempDir(uploadKey)
+                        }
                         
                         // Create the final entity with the permanent ID
                         val newEntity = update.message.toFileEntity(activeUserId, parentId)
@@ -280,6 +292,7 @@ class FileRepositoryImpl @Inject constructor(
                             dequeuePendingParent(uploadKey)
                             dequeueUploadMeta(uploadKey)
                             dequeuePendingSafId(uploadKey)
+                            cleanupPendingTempDir(uploadKey)
                         }
 
                         // Delete the temporary record from Room
@@ -1045,6 +1058,36 @@ class FileRepositoryImpl @Inject constructor(
         return value
     }
 
+    private fun enqueuePendingTempDir(fileName: String, tempDir: java.io.File) {
+        pendingUploadTempDirs
+            .getOrPut(fileName) { java.util.concurrent.ConcurrentLinkedQueue() }
+            .add(tempDir)
+    }
+
+    private fun cleanupPendingTempDir(fileName: String) {
+        val queue = pendingUploadTempDirs[fileName] ?: return
+        while (true) {
+            val dir = queue.poll() ?: break
+            try {
+                if (dir.isDirectory) {
+                    dir.deleteRecursively()
+                } else {
+                    dir.delete()
+                    dir.parentFile?.let { parent ->
+                        if (parent.name.startsWith("upload_") || parent.name.startsWith("saf_upload_") || parent.name.startsWith("replace_")) {
+                            parent.delete()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("FileRepositoryImpl", "Could not delete upload temp dir: ${dir.absolutePath}", e)
+            }
+        }
+        if (queue.isEmpty()) {
+            pendingUploadTempDirs.remove(fileName, queue)
+        }
+    }
+
     override suspend fun uploadSafFile(
         tempFile: java.io.File,
         displayName: String,
@@ -1082,6 +1125,7 @@ class FileRepositoryImpl @Inject constructor(
                 if (placeholderId != null) {
                     enqueuePendingSafId(encFile.name, placeholderId)
                 }
+                enqueuePendingTempDir(encFile.name, tempDir)
 
                 val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
                 val inputMessageContent = TdApi.InputMessageDocument(
@@ -1109,8 +1153,9 @@ class FileRepositoryImpl @Inject constructor(
                     dequeuePendingParent(encFile.name)
                     dequeueUploadMeta(encFile.name)
                     dequeuePendingSafId(encFile.name)
+                    cleanupPendingTempDir(encFile.name)
                     encFile.delete()
-                    tempDir.delete()
+                    tempDir.deleteRecursively()
                     Log.e("FileRepositoryImpl", "Failed to queue SAF upload: ${e.message}", e)
                     _downloadEvents.tryEmit(
                         DownloadEvent.Failure(placeholderId, cleanName, e.message ?: "Failed to queue upload")
@@ -1348,6 +1393,7 @@ class FileRepositoryImpl @Inject constructor(
             enqueuePendingParent(encFile.name, parentId)
         }
         enqueueUploadMeta(encFile.name, UploadMeta(storedDisplayName, mimeType))
+        enqueuePendingTempDir(encFile.name, tempDir)
 
         val inputFile = TdApi.InputFileLocal(encFile.absolutePath)
         val inputMessageContent = TdApi.InputMessageDocument(
@@ -1374,8 +1420,9 @@ class FileRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             dequeuePendingParent(encFile.name)
             dequeueUploadMeta(encFile.name)
+            cleanupPendingTempDir(encFile.name)
             encFile.delete()
-            tempDir.delete()
+            tempDir.deleteRecursively()
             Log.e("FileRepositoryImpl", "Failed to queue upload container: ${e.message}", e)
             _downloadEvents.tryEmit(
                 DownloadEvent.Failure(null, storedDisplayName, e.message ?: "Failed to queue upload")
