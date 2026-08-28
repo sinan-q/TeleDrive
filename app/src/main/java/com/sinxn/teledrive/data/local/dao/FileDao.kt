@@ -51,11 +51,12 @@ interface FileDao {
     @Query("""
         SELECT * FROM files
         WHERE user_id = :userId
-          AND original_file_name = :originalFileName
+          AND is_multipart = 1
+          AND name = :name
           AND deleted_at IS NULL
         ORDER BY part_index ASC, created_at ASC
     """)
-    suspend fun getMultipartFiles(userId: String, originalFileName: String): List<FileEntity>
+    suspend fun getMultipartFiles(userId: String, name: String): List<FileEntity>
 
     /** Soft-delete a file by setting deleted_at timestamp */
     @Query("UPDATE files SET deleted_at = :timestamp WHERE id = :id")
@@ -76,9 +77,13 @@ interface FileDao {
     @Query("UPDATE files SET upload_progress = :progress WHERE id = :id")
     suspend fun updateTransferProgressById(id: String, progress: Float)
 
-    /** Rename a file or folder */
+    /** Rename a single file or folder */
     @Query("UPDATE files SET name = :newName, updated_at = :timestamp WHERE id = :id")
     suspend fun renameFile(id: String, newName: String, timestamp: Long = System.currentTimeMillis())
+
+    /** Rename all parts of a multipart file */
+    @Query("UPDATE files SET name = :newName, updated_at = :timestamp WHERE user_id = :userId AND is_multipart = 1 AND name = :oldName")
+    suspend fun renameMultipartFiles(userId: String, oldName: String, newName: String, timestamp: Long = System.currentTimeMillis())
 
     /** Move a file or folder to a different parent */
     @Query("UPDATE files SET parent_id = :newParentId, updated_at = :timestamp WHERE id = :id")

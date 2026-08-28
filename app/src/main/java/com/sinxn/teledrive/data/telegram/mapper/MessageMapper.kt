@@ -15,26 +15,6 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
 
     // Part aggregation logic
     val partRegex = Regex("""^(.*)\.part(\d+)$""", RegexOption.IGNORE_CASE)
-    var isMultipart = false
-    var partIndex: Int? = null
-    var originalFileName: String? = null
-
-    // Helper to evaluate parts
-    fun parseMultipart(fileName: String): String {
-        val cleanName = if (fileName.endsWith(".enc")) {
-            fileName.removeSuffix(".enc")
-        } else fileName
-
-        val matchResult = partRegex.find(cleanName)
-        if (matchResult != null) {
-            isMultipart = true
-            originalFileName = matchResult.groupValues[1]
-            partIndex = matchResult.groupValues[2].toIntOrNull()
-        } else {
-            originalFileName = cleanName
-        }
-        return cleanName
-    }
 
     return when (val content = this.content) {
         is TdApi.MessageDocument -> {
@@ -43,28 +23,45 @@ fun TdApi.Message.toFileEntity(userId: String, parentId: String? = null): FileEn
                 return null
             }
 
-            val fileName = content.document.fileName.trim().takeIf { it.isNotBlank() } ?: "Unknown Document"
+            val rawFileName = content.document.fileName.trim().takeIf { it.isNotBlank() } ?: "Unknown Document"
             
             // Exclude metadata files or non-encrypted files
-            if (fileName.startsWith("metadata_") && fileName.endsWith(".enc", ignoreCase = true)) {
+            if (rawFileName.startsWith("metadata_") && rawFileName.endsWith(".enc", ignoreCase = true)) {
                 return null
             }
 
             // Only accept encrypted files uploaded by TeleDrive
-            if (!fileName.endsWith(".enc", ignoreCase = true)) {
+            if (!rawFileName.endsWith(".enc", ignoreCase = true)) {
                 return null
             }
             
-            val cleanName = parseMultipart(fileName)
+            val cleanName = if (rawFileName.endsWith(".enc", ignoreCase = true)) {
+                rawFileName.dropLast(4)
+            } else rawFileName
+
+            val matchResult = partRegex.find(cleanName)
+            val isMultipart: Boolean
+            val partIndex: Int?
+            val userFacingName: String
+
+            if (matchResult != null) {
+                isMultipart = true
+                userFacingName = matchResult.groupValues[1]
+                partIndex = matchResult.groupValues[2].toIntOrNull()
+            } else {
+                isMultipart = false
+                userFacingName = cleanName
+                partIndex = null
+            }
             
             FileEntity(
                 id = entityId,
-                name = cleanName,
+                name = userFacingName,
                 type = "file",
                 mimeType = content.document.mimeType,
                 isMultipart = isMultipart,
                 partIndex = partIndex,
-                originalFileName = originalFileName,
+                originalFileName = rawFileName,
                 size = content.document.document.expectedSize.toLong(),
                 messageId = this.id.toString(),
                 fileId = content.document.document.id.toString(),

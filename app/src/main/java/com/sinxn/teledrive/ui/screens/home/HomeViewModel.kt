@@ -90,6 +90,10 @@ class HomeViewModel @Inject constructor(
         _fileToReplace.value = file
     }
 
+    fun cancelReplaceFlow() {
+        _fileToReplace.value = null
+    }
+
     fun onReplacementFilePicked(uri: Uri) {
         val target = _fileToReplace.value ?: return
         _fileToReplace.value = null

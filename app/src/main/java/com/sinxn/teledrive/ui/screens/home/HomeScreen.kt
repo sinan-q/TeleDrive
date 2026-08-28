@@ -94,7 +94,11 @@ fun HomeScreen(
     val replacePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
-        uri?.let { viewModel.onReplacementFilePicked(it) }
+        if (uri != null) {
+            viewModel.onReplacementFilePicked(uri)
+        } else {
+            viewModel.cancelReplaceFlow()
+        }
     }
 
     // Observe fileToReplace — launch picker when a file is targeted for replacement

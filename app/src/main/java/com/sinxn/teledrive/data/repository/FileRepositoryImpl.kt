@@ -328,23 +328,17 @@ class FileRepositoryImpl @Inject constructor(
     override fun getFilesByParent(parentId: String?, userId: String): Flow<List<FileEntity>> =
         fileDao.getFilesByParent(parentId, userId).map { fileList ->
             // Aggregate multipart chunks (e.g. video.mp4.part1, video.mp4.part2)
-            // Group by originalFileName (if multipart) OR id (if normal file/folder)
+            // Group by user-facing name (if multipart) OR id (if normal file/folder)
             val aggregatedFiles = fileList.groupBy { file ->
-                if (file.isMultipart && file.originalFileName != null) file.originalFileName else file.id
+                if (file.isMultipart) file.name else file.id
             }.map { (key, group) ->
                 if (group.size == 1) {
-                    // Normal file or a multipart file with only 1 chunk found
                     group.first()
                 } else {
                     // Aggregate multiple chunks into one conceptual file
                     val firstChunk = group.minByOrNull { it.partIndex ?: Int.MAX_VALUE } ?: group.first()
                     val totalSize = group.filter { it.size != null }.sumOf { it.size!! }
-                    
-                    // Return the base file but with the combined total size and clean name
-                    firstChunk.copy(
-                        name = firstChunk.originalFileName ?: firstChunk.name,
-                        size = totalSize
-                    )
+                    firstChunk.copy(size = totalSize)
                 }
             }
             aggregatedFiles
@@ -557,37 +551,37 @@ class FileRepositoryImpl @Inject constructor(
 
     private suspend fun downloadMultipartFile(file: FileEntity) {
         ensureReadyForTransfer()
-        val originalName = file.originalFileName ?: file.name
-        val chunks = fileDao.getMultipartFiles(file.userId, originalName)
+        val displayName = file.name
+        val chunks = fileDao.getMultipartFiles(file.userId, displayName)
         if (chunks.isEmpty()) {
-            _downloadEvents.emit(DownloadEvent.Failure(file.id, originalName, "No file chunks found"))
+            _downloadEvents.emit(DownloadEvent.Failure(file.id, displayName, "No file chunks found"))
             return
         }
 
-        val assembledFile = java.io.File(context.cacheDir, "assembled_${java.util.UUID.randomUUID()}_$originalName")
+        val assembledFile = java.io.File(context.cacheDir, "assembled_${java.util.UUID.randomUUID()}_$displayName")
         try {
-            _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Downloading from Telegram..."))
+            _downloadEvents.emit(DownloadEvent.Status(file.id, displayName, "Downloading from Telegram..."))
             java.io.FileOutputStream(assembledFile).use { assembledOutput ->
                 for (chunk in chunks) {
                     val resolvedChunk = resolveLatestDownloadableFile(chunk) ?: chunk
                     val fileId = resolvedChunk.fileId?.toIntOrNull()
                     if (fileId == null) {
-                        _downloadEvents.emit(DownloadEvent.Failure(file.id, originalName, "Missing Telegram file ID for a chunk"))
+                        _downloadEvents.emit(DownloadEvent.Failure(file.id, displayName, "Missing Telegram file ID for a chunk"))
                         return
                     }
 
                     val downloadResult = downloadTelegramFileWithPolling(fileId)
                     val tdFile = downloadResult.getOrElse { error ->
                         val errorMsg = error.message?.takeIf { it.isNotBlank() } ?: "Chunk download failed"
-                        Log.e("FileRepositoryImpl", "Chunk download failed for $originalName (part ${resolvedChunk.partIndex}): $errorMsg", error)
-                        _downloadEvents.emit(DownloadEvent.Failure(file.id, originalName, "Chunk download failed: $errorMsg"))
-                        throw IllegalStateException("Chunk download failed for $originalName: $errorMsg", error)
+                        Log.e("FileRepositoryImpl", "Chunk download failed for $displayName (part ${resolvedChunk.partIndex}): $errorMsg", error)
+                        _downloadEvents.emit(DownloadEvent.Failure(file.id, displayName, "Chunk download failed: $errorMsg"))
+                        throw IllegalStateException("Chunk download failed for $displayName: $errorMsg", error)
                     }
 
                     val downloadedFile = java.io.File(tdFile.local.path)
-                    val decryptedChunk = java.io.File(context.cacheDir, "dec_${java.util.UUID.randomUUID()}_${resolvedChunk.name}")
+                    val decryptedChunk = java.io.File(context.cacheDir, "dec_${java.util.UUID.randomUUID()}_${resolvedChunk.id}")
                     try {
-                        _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Decrypting..."))
+                        _downloadEvents.emit(DownloadEvent.Status(file.id, displayName, "Decrypting..."))
                         fileCryptor.decryptFile(downloadedFile, decryptedChunk)
                         decryptedChunk.inputStream().use { it.copyTo(assembledOutput) }
                     } finally {
@@ -596,27 +590,25 @@ class FileRepositoryImpl @Inject constructor(
                 }
             }
 
-
-
             val exportMimeType = file.mimeType ?: "application/octet-stream"
-            _downloadEvents.emit(DownloadEvent.Status(file.id, originalName, "Saving to Downloads..."))
+            _downloadEvents.emit(DownloadEvent.Status(file.id, displayName, "Saving to Downloads..."))
             val exported = com.sinxn.teledrive.utils.FileUtils.exportToDownloads(
                 context,
                 assembledFile,
-                originalName,
+                displayName,
                 exportMimeType
             )
             if (exported) {
-                _downloadEvents.emit(DownloadEvent.Success(file.id, originalName))
+                _downloadEvents.emit(DownloadEvent.Success(file.id, displayName))
             } else {
                 _downloadEvents.emit(
-                    DownloadEvent.Failure(file.id, originalName, "Could not write file to Downloads/TeleDrive")
+                    DownloadEvent.Failure(file.id, displayName, "Could not write file to Downloads/TeleDrive")
                 )
             }
         } catch (e: Exception) {
             Log.e("FileRepositoryImpl", "Failed to download multipart file", e)
             _downloadEvents.emit(
-                DownloadEvent.Failure(file.id, originalName, e.message ?: "Failed to download multipart file")
+                DownloadEvent.Failure(file.id, displayName, e.message ?: "Failed to download multipart file")
             )
         } finally {
             assembledFile.delete()
@@ -624,7 +616,12 @@ class FileRepositoryImpl @Inject constructor(
     }
 
     override suspend fun renameFile(id: String, newName: String) {
-        fileDao.renameFile(id, newName)
+        val target = fileDao.getFileById(id) ?: return
+        if (target.isMultipart) {
+            fileDao.renameMultipartFiles(target.userId, target.name, newName)
+        } else {
+            fileDao.renameFile(id, newName)
+        }
         securePrefs.getUserId()?.let { saveMetadataRemote(it) }
     }
 
@@ -639,14 +636,17 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun replaceFile(existingFile: FileEntity, newContentUri: Uri) {
         withContext(Dispatchers.IO) {
             ensureReadyForTransfer()
-            val pickedFile = com.sinxn.teledrive.utils.FileUtils.resolvePickedFileMetadata(context, newContentUri)
             val targetChatId = resolveTargetChatId(existingFile.userId)
 
             _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Encrypting replacement..."))
 
             // Multipart files: delete all old chunks then re-upload
-            if (existingFile.isMultipart && !existingFile.originalFileName.isNullOrBlank()) {
-                replaceMultipartFile(existingFile, newContentUri, pickedFile, targetChatId)
+            if (existingFile.isMultipart) {
+                replaceMultipartFile(
+                    existingFile = existingFile,
+                    sourceStreamProvider = { context.contentResolver.openInputStream(newContentUri) },
+                    chatId = targetChatId
+                )
                 return@withContext
             }
 
@@ -672,7 +672,7 @@ class FileRepositoryImpl @Inject constructor(
                 val result = try {
                     telegramClient.sendWithTimeout(
                         TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent),
-                        30_000L
+                        300_000L
                     )
                 } catch (e: Exception) {
                     Log.e("FileRepositoryImpl", "EditMessageMedia failed: ${e.message}", e)
@@ -725,12 +725,12 @@ class FileRepositoryImpl @Inject constructor(
      */
     private suspend fun replaceMultipartFile(
         existingFile: FileEntity,
-        newContentUri: Uri,
-        pickedFile: com.sinxn.teledrive.utils.FileUtils.PickedFileMetadata,
+        sourceStreamProvider: () -> java.io.InputStream?,
         chatId: Long
     ) {
-        val originalName = existingFile.originalFileName ?: existingFile.name
-        val chunks = fileDao.getMultipartFiles(existingFile.userId, originalName)
+        val displayName = existingFile.name
+        val chunks = fileDao.getMultipartFiles(existingFile.userId, displayName)
+        val allOldChunks = if (chunks.isNotEmpty()) chunks else listOf(existingFile)
 
         val tempDir = java.io.File(context.cacheDir, "replace_mp_${java.util.UUID.randomUUID()}").apply {
             mkdirs()
@@ -741,7 +741,7 @@ class FileRepositoryImpl @Inject constructor(
         try {
             _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Encrypting replacement..."))
 
-            val bytesRead = context.contentResolver.openInputStream(newContentUri)?.use { sourceStream ->
+            val bytesRead = sourceStreamProvider()?.use { sourceStream ->
                 fileCryptor.encryptStream(sourceStream, encFile)
             } ?: error("Could not open replacement file")
 
@@ -772,7 +772,7 @@ class FileRepositoryImpl @Inject constructor(
 
             _downloadEvents.emit(DownloadEvent.Status(existingFile.id, existingFile.name, "Uploading replacement..."))
 
-            val sendResultObj = telegramClient.sendWithTimeout(sendMessage)
+            val sendResultObj = telegramClient.sendWithTimeout(sendMessage, 300_000L)
             val tempMessage = sendResultObj as? TdApi.Message
                 ?: error("Failed to initiate replacement upload: unexpected response $sendResultObj")
 
@@ -784,25 +784,31 @@ class FileRepositoryImpl @Inject constructor(
 
             when (updateResult) {
                 is TdApi.UpdateMessageSendSucceeded -> {
+                    val newEntityId = "msg_${updateResult.message.id}"
+                    allOldChunks.forEach { chunk ->
+                        safIdAliases[chunk.id] = newEntityId
+                    }
+                    safIdAliases[existingFile.id] = newEntityId
+
                     // 1. Delete all old chunk messages from Telegram now that replacement is confirmed
-                    val messageIds = chunks.mapNotNull { it.messageId?.toLongOrNull() }.toLongArray()
+                    val messageIds = allOldChunks.mapNotNull { it.messageId?.toLongOrNull() }.toLongArray()
                     if (messageIds.isNotEmpty()) {
                         try {
                             telegramClient.sendWithTimeout(TdApi.DeleteMessages(chatId, messageIds, true))
-                            Log.d("FileRepositoryImpl", "Deleted ${messageIds.size} old chunk messages for '$originalName'")
+                            Log.d("FileRepositoryImpl", "Deleted ${messageIds.size} old chunk messages for '$displayName'")
                         } catch (e: Exception) {
                             Log.e("FileRepositoryImpl", "Failed to delete old chunk messages after replacement", e)
                         }
                     }
 
                     // 2. Hard-delete old chunk records from Room
-                    for (chunk in chunks) {
+                    for (chunk in allOldChunks) {
                         fileDao.hardDeleteFile(chunk.id)
                     }
 
                     saveMetadataRemote(existingFile.userId)
                     _downloadEvents.emit(DownloadEvent.Success(existingFile.id, existingFile.name))
-                    Log.d("FileRepositoryImpl", "Successfully replaced multipart file '$originalName' (deleted ${messageIds.size} old chunks)")
+                    Log.d("FileRepositoryImpl", "Successfully replaced multipart file '$displayName' (deleted ${messageIds.size} old chunks)")
                 }
                 is TdApi.UpdateMessageSendFailed -> {
                     dequeuePendingParent(encFile.name)
@@ -825,10 +831,11 @@ class FileRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             dequeuePendingParent(encFile.name)
             dequeueUploadMeta(encFile.name)
-            Log.e("FileRepositoryImpl", "Failed to replace multipart file '$originalName'", e)
+            Log.e("FileRepositoryImpl", "Failed to replace multipart file '$displayName'", e)
             _downloadEvents.emit(
                 DownloadEvent.Failure(existingFile.id, existingFile.name, "Replace failed: ${e.message ?: "Unknown error"}")
             )
+            throw e
         } finally {
             encFile.delete()
             tempDir.delete()
@@ -999,14 +1006,11 @@ class FileRepositoryImpl @Inject constructor(
      * This is useful for looking up metadata in the pendingUploadMeta map.
      */
     private fun FileEntity.localName(): String {
-        return if (this.name.endsWith(".enc")) this.name else "${this.name}.enc"
+        return this.originalFileName ?: if (this.name.endsWith(".enc")) this.name else "${this.name}.enc"
     }
 
     private fun FileEntity.cleanExportName(): String {
         val suffix = ".enc"
-        if (!this.originalFileName.isNullOrBlank()) {
-            return this.originalFileName
-        }
         return if (this.name.length >= suffix.length && this.name.lowercase().endsWith(suffix)) {
             this.name.substring(0, this.name.length - suffix.length)
         } else {
@@ -1178,6 +1182,17 @@ class FileRepositoryImpl @Inject constructor(
             try {
                 ensureReadyForTransfer()
                 val targetChatId = resolveTargetChatId(existingFile.userId)
+
+                // Multipart files: delete all old chunks then re-upload
+                if (existingFile.isMultipart) {
+                    replaceMultipartFile(
+                        existingFile = existingFile,
+                        sourceStreamProvider = { tempFile.inputStream() },
+                        chatId = targetChatId
+                    )
+                    return@withContext
+                }
+
                 val messageId = existingFile.messageId?.toLongOrNull()
                     ?: error("Cannot replace file without a Telegram message ID")
 
@@ -1196,7 +1211,7 @@ class FileRepositoryImpl @Inject constructor(
                     val result = try {
                         telegramClient.sendWithTimeout(
                             TdApi.EditMessageMedia(targetChatId, messageId, null, inputContent),
-                            30_000L
+                            300_000L
                         )
                     } catch (e: Exception) {
                         Log.e("FileRepositoryImpl", "EditMessageMedia failed for SAF file '${existingFile.name}': ${e.message}", e)

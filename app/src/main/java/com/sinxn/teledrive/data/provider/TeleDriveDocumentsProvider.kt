@@ -656,10 +656,9 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
     }
 
     private fun FileEntity.cleanExportName(): String {
-        if (!this.originalFileName.isNullOrBlank()) return this.originalFileName
         val suffix = ".enc"
-        return if (this.name.lowercase().endsWith(suffix)) {
-            this.name.dropLast(suffix.length)
+        return if (this.name.length >= suffix.length && this.name.lowercase().endsWith(suffix)) {
+            this.name.substring(0, this.name.length - suffix.length)
         } else {
             this.name
         }
