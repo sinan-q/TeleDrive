@@ -37,6 +37,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.drinkless.tdlib.TdApi
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -135,6 +137,12 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
             }
         }
 
+        // Check if vault is unlocked (if master password is configured)
+        if (encryptionManager.isPasswordSetUp() && !encryptionManager.isUnlocked) {
+            Log.w(TAG, "Vault is locked and cannot be auto-unlocked in background")
+            return false
+        }
+
         // 2. If TDLib is not started yet, start it
         if (!authManager.isStarted) {
             authManager.startClient()
@@ -188,6 +196,12 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         val result = MatrixCursor(resolveDocProjection(projection))
         if (documentId == null) return result
 
+        val authority = "${context?.packageName}.documents"
+        val notifyUri = DocumentsContract.buildDocumentUri(authority, documentId)
+        context?.contentResolver?.let { cr ->
+            result.setNotificationUri(cr, notifyUri)
+        }
+
         if (documentId == ROOT_DOC_ID) {
             result.newRow().apply {
                 add(DocumentsContract.Document.COLUMN_DOCUMENT_ID, ROOT_DOC_ID)
@@ -219,6 +233,13 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
         sortOrder: String?
     ): Cursor {
         val result = MatrixCursor(resolveDocProjection(projection))
+        val authority = "${context?.packageName}.documents"
+        val parentTarget = if (parentDocumentId.isNullOrEmpty()) ROOT_DOC_ID else parentDocumentId
+        val notifyUri = DocumentsContract.buildChildDocumentsUri(authority, parentTarget)
+        context?.contentResolver?.let { cr ->
+            result.setNotificationUri(cr, notifyUri)
+        }
+
         val userId = securePrefs.getUserId() ?: return result
 
         // Map the virtual ROOT_DOC_ID to null parentId (root level in the DB).
@@ -413,10 +434,14 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
                 mode?.contains("rwt") == true ||
                 mode?.contains("wa") == true
 
-        return if (isWrite && mode != null) {
-            openDocumentForWrite(entity, mode)
+        if (isWrite) {
+            val isReady = runBlocking(Dispatchers.IO) { ensureTdLibAndVaultReady() }
+            if (!isReady) {
+                throw FileNotFoundException("Vault is locked")
+            }
+            return openDocumentForWrite(entity, mode)
         } else {
-            openDocumentForRead(entity, signal)
+            return openDocumentForRead(entity, signal)
         }
     }
 
@@ -575,6 +600,15 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
             }
 
             val parentId = entity.parentId
+            val writtenSize = tempFile.length()
+
+            // Persist the actual written size immediately so queries reflect it without waiting for Telegram upload
+            if (writtenSize > 0L) {
+                fileDao.updateFileSize(resolvedId, writtenSize)
+                notifyDocumentChanged(documentId)
+                notifyParentChanged(parentId ?: ROOT_DOC_ID)
+            }
+
             val existingMessageId = entity.messageId?.toLongOrNull()
 
             if (existingMessageId != null && !entity.fileId.isNullOrBlank()) {
@@ -645,11 +679,20 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
                     DocumentsContract.Document.FLAG_SUPPORTS_MOVE
         }
 
+        val effectiveSize = if (!isFolder && entity.size == 0L) {
+            val activeTemp = context?.cacheDir?.listFiles { file ->
+                file.name.startsWith("saf_write_${entity.id}_") && file.name.endsWith(".tmp")
+            }?.maxByOrNull { it.lastModified() }
+            activeTemp?.takeIf { it.length() > 0L }?.length() ?: entity.size
+        } else {
+            entity.size
+        }
+
         cursor.newRow().apply {
             add(DocumentsContract.Document.COLUMN_DOCUMENT_ID, entity.id)
             add(DocumentsContract.Document.COLUMN_DISPLAY_NAME, entity.cleanExportName())
             add(DocumentsContract.Document.COLUMN_MIME_TYPE, mimeType)
-            add(DocumentsContract.Document.COLUMN_SIZE, entity.size)
+            add(DocumentsContract.Document.COLUMN_SIZE, effectiveSize)
             add(DocumentsContract.Document.COLUMN_LAST_MODIFIED, entity.updatedAt)
             add(DocumentsContract.Document.COLUMN_FLAGS, flags)
         }
@@ -712,12 +755,14 @@ class TeleDriveDocumentsProvider : DocumentsProvider() {
 
     private fun notifyParentChanged(parentId: String) {
         val authority = "${context?.packageName}.documents"
-        val uri = if (parentId == ROOT_DOC_ID) {
-            DocumentsContract.buildRootsUri(authority)
-        } else {
-            DocumentsContract.buildChildDocumentsUri(authority, parentId)
+        val targetParentId = if (parentId.isBlank()) ROOT_DOC_ID else parentId
+        val childUri = DocumentsContract.buildChildDocumentsUri(authority, targetParentId)
+        context?.contentResolver?.notifyChange(childUri, null)
+
+        if (targetParentId == ROOT_DOC_ID) {
+            val rootsUri = DocumentsContract.buildRootsUri(authority)
+            context?.contentResolver?.notifyChange(rootsUri, null)
         }
-        context?.contentResolver?.notifyChange(uri, null)
     }
 
     private suspend fun resolveLatestFile(file: FileEntity): FileEntity {

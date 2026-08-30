@@ -29,6 +29,10 @@ interface FileDao {
     @Update
     suspend fun updateFile(file: FileEntity)
 
+    /** Update file size and modification timestamp immediately */
+    @Query("UPDATE files SET size = :size, updated_at = :timestamp WHERE id = :id")
+    suspend fun updateFileSize(id: String, size: Long, timestamp: Long = System.currentTimeMillis())
+
     /** Get all non-deleted files in a folder (null parentId = root level) */
     @Query("""
         SELECT * FROM files 

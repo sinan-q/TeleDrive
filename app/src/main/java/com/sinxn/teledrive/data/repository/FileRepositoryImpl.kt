@@ -2,6 +2,7 @@ package com.sinxn.teledrive.data.repository
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import com.sinxn.teledrive.data.local.dao.FileDao
 import com.sinxn.teledrive.data.local.entity.FileEntity
@@ -76,6 +77,23 @@ class FileRepositoryImpl @Inject constructor(
     private val safIdAliases = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     override fun resolveSafAlias(safId: String): String? = safIdAliases[safId]
+
+    private fun notifySafChange(safId: String?, permanentId: String?, parentId: String?) {
+        try {
+            val authority = "${context.packageName}.documents"
+            val cr = context.contentResolver
+            if (safId != null) {
+                cr.notifyChange(DocumentsContract.buildDocumentUri(authority, safId), null)
+            }
+            if (permanentId != null && permanentId != safId) {
+                cr.notifyChange(DocumentsContract.buildDocumentUri(authority, permanentId), null)
+            }
+            val targetParent = if (parentId.isNullOrEmpty()) "teledrive_root" else parentId
+            cr.notifyChange(DocumentsContract.buildChildDocumentsUri(authority, targetParent), null)
+        } catch (e: Exception) {
+            Log.w("FileRepositoryImpl", "Failed to dispatch SAF notification", e)
+        }
+    }
 
     private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     override val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
@@ -215,6 +233,9 @@ class FileRepositoryImpl @Inject constructor(
                                     }
 
                                     fileDao.insertFile(entityToInsert)
+                                    if (safId != null) {
+                                        notifySafChange(safId, entityToInsert.id, entityToInsert.parentId)
+                                    }
                                 }
                             }
                         }
@@ -265,14 +286,17 @@ class FileRepositoryImpl @Inject constructor(
                                 else -> newEntity
                             }
 
+                            val notifiedSafIds = mutableListOf<String>()
                             if (safId != null) {
                                 fileDao.hardDeleteFile(safId)
                                 safIdAliases[safId] = cleanEntity.id
+                                notifiedSafIds.add(safId)
                             }
                             // Update existing aliases targeting old temporary message ID
                             safIdAliases.entries.forEach { entry ->
                                 if (entry.value == oldId) {
                                     safIdAliases[entry.key] = cleanEntity.id
+                                    notifiedSafIds.add(entry.key)
                                 }
                             }
 
@@ -280,6 +304,12 @@ class FileRepositoryImpl @Inject constructor(
                             fileDao.hardDeleteFile(oldId)
                             fileDao.insertFile(cleanEntity)
                             saveMetadataRemote(activeUserId)
+
+                            if (notifiedSafIds.isNotEmpty()) {
+                                notifiedSafIds.forEach { aliasedSafId ->
+                                    notifySafChange(aliasedSafId, cleanEntity.id, cleanEntity.parentId)
+                                }
+                            }
                         }
                     }
                     is TdApi.UpdateMessageSendFailed -> {
